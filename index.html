@@ -100,7 +100,12 @@ async function putLines(lines){
   return new Promise((resolve,reject)=>{
     const tx = db.transaction(['lines'], 'readwrite');
     const store = tx.objectStore('lines');
-    lines.forEach(l => store.put(l));
+    lines.forEach(l => {
+      // zaručíme, že má vždy owned (boolean) a platné id
+      if(l.id === undefined || l.id === null) l.id = crypto.randomUUID();
+      if(typeof l.owned === 'undefined') l.owned = false;
+      store.put(l);
+    });
     tx.oncomplete = ()=> resolve();
     tx.onerror = ()=> reject(tx.error);
   });
@@ -126,11 +131,11 @@ function markOwned(id){
 }
 
 function countStore(storeName, indexName, query){
+  // jednoduchý wrapper, ale nevoláme sem riskantní IDBKeyRange
   return new Promise((resolve,reject)=>{
     const tx = db.transaction([storeName], 'readonly');
     const store = tx.objectStore(storeName);
-    const source = indexName ? store.index(indexName) : store;
-    const req = source.count(query || null);
+    const req = store.count();
     req.onsuccess = ()=> resolve(req.result);
     req.onerror = ()=> reject(req.error);
   });
@@ -149,12 +154,32 @@ async function getRandomOfferableLine(maxScan=600){
       const cur = req.result;
       if(!cur || seen>=maxScan){ return resolve(choice); }
       const val = cur.value;
-      if(!val.owned && !OFFERING.has(val.id)){
+      // pokud val.owned je undefined -> bereme jako false
+      const isOwned = !!val.owned;
+      if(!isOwned && !OFFERING.has(val.id)){
         // reservoir sampling
         choiceCount++;
         if(Math.random() < 1/choiceCount) choice = val;
       }
       seen++;
+      cur.continue();
+    };
+    req.onerror = ()=> reject(req.error);
+  });
+}
+
+/* new: bezpečné spočítání záznamů bez owned (cursor) */
+function countNonOwned(){
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(['lines'], 'readonly');
+    const store = tx.objectStore('lines');
+    const req = store.openCursor();
+    let cnt = 0;
+    req.onsuccess = ()=>{
+      const cur = req.result;
+      if(!cur){ resolve(cnt); return; }
+      const val = cur.value;
+      if(!val.owned) cnt++;
       cur.continue();
     };
     req.onerror = ()=> reject(req.error);
@@ -255,8 +280,10 @@ async function fetchTileToDB(tile){
     if(toStore.length) await putLines(toStore);
     tilesDone.add(key);
     updateTilesBadge();
+    setStatus(`Načteno ${toStore.length} linek z dlaždice ${key}`);
   }catch(e){
     console.warn('Tile fetch failed', e);
+    setStatus('Chyba při načítání dlaždice (konzole).');
   }
 }
 
@@ -286,10 +313,17 @@ let ownedCount = 0;
 function updateBadges(){
   offeredCountEl.textContent = `${OFFERING.size} v nabídce`;
   ownedCountEl.textContent = `${ownedCount} koupeno`;
-  // hrubý odhad celku v DB (bez owned) – jen informativně
-  countStore('lines','owned', IDBKeyRange.only(false)).then(c=>{
+
+  // Bezpečné počítání ne-vlastněných záznamů (cursor) místo IDBKeyRange.only(false)
+  countNonOwned().then(c=>{
     poolCountEl.textContent = `${c} v DB`;
-  }).catch(()=>{});
+  }).catch(err=>{
+    console.warn('countNonOwned failed', err);
+    // fallback: prostý count všech záznamů
+    countStore('lines').then(c=>{
+      poolCountEl.textContent = `${c} v DB (celkem)`;
+    }).catch(()=>{ poolCountEl.textContent = '—'; });
+  });
 }
 
 function iconForType(t){
@@ -386,6 +420,7 @@ setInterval(offerOneFromDB, 10000); // každých 10 s
     setStatus('offline – používám pouze IndexedDB');
   }
 })();
+
 </script>
 </body>
 </html>
