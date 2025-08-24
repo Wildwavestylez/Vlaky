@@ -188,7 +188,7 @@ function countNonOwned(){
 
 /* ===================== OVERPASS + TILING ===================== */
 // Central Europe rough bbox:
-const CE = { south: 42.0, north: 58.0, west: 0.0, east: 25.0 };
+const CE = { south: 36.0, north: 68.0, west: -9.5, east: 30.0 };
 // ~50 km step: 1° lat ~ 111 km, lon step varies by cosφ
 function generateTiles(region=CE, km=50){
   const tiles = [];
