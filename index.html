@@ -148,41 +148,36 @@ function countStore(storeName, indexName, query){
 }
 
 /* ===================== NABÍZENÍ LINEK (z DB) ===================== */
-let ownedCount = 0;
+let ownedInSession = new Set(); // jen pro aktuální hru
 
 function updateBadges(){
   offeredCountEl.textContent = `${OFFERING.size} v nabídce`;
-  ownedCountEl.textContent = `${ownedCount} koupeno`;
+  ownedCountEl.textContent = `${ownedInSession.size} koupeno`;
 
-  // bezpečné počítání linky, které nejsou owned
-  countStoreSafe('lines', 'owned').then(c=>{
+  // počet všech linek v IndexedDB (ignorujeme owned)
+  countStoreSafe('lines').then(c=>{
     poolCountEl.textContent = `${c} v DB`;
-  }).catch(err=>{
-    console.warn("Chyba při čtení z DB:", err);
-    poolCountEl.textContent = `? v DB`;
-  });
+  }).catch(()=>{});
 }
 
-/* bezpečné počítání z IndexedDB */
-function countStoreSafe(storeName, indexName){
-  return new Promise((resolve,reject)=>{
-    const tx = db.transaction([storeName], 'readonly');
-    const store = tx.objectStore(storeName);
-    const index = indexName ? store.index(indexName) : store;
+// když hráč koupí linku:
+function buyLine(line){
+  if(!line) return;
+  ownedInSession.add(line.id);   // jen pro session
+  OFFERING.delete(line.id);      // zmizí z aktuální nabídky
+  updateBadges();
+}
 
-    let count = 0;
-    const req = index.openCursor();
-    req.onsuccess = e=>{
-      const cur = e.target.result;
-      if(!cur){ resolve(count); return; }
-      if(indexName){
-        if(cur.value[indexName] === false) count++;
-      } else {
-        count++;
+// načtení linek z IndexedDB do nabídky
+function refreshOfferings(){
+  OFFERING.clear();
+  dbGetAll('lines').then(lines=>{
+    for(const line of lines){
+      if(!ownedInSession.has(line.id)){ // filtrovat jen během session
+        OFFERING.set(line.id, line);
       }
-      cur.continue();
-    };
-    req.onerror = e=> reject(e.target.error);
+    }
+    updateBadges();
   });
 }
 
