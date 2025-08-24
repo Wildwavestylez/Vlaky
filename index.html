@@ -6,19 +6,29 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
 <style>
-  html,body{height:100%;margin:0}
-  #map{height:100%}
-  #hamburger{position:fixed;top:10px;left:10px;z-index:1100;background:#111;color:#fff;border:0;border-radius:12px;padding:10px 12px;font-size:18px;box-shadow:0 4px 12px rgba(0,0,0,.2);cursor:pointer}
-  #menu{position:fixed;top:0;left:0;height:100%;width:340px;z-index:1000;background:#fff;box-shadow:2px 0 16px rgba(0,0,0,.15);transform:translateX(-360px);transition:transform .25s ease;padding:12px;overflow-y:auto}
-  #menu.open{transform:translateX(0)}
-  .offer{border:1px solid #e5e7eb;border-radius:10px;padding:10px;margin:8px 0}
-  .btn{display:inline-block;background:#0ea5e9;color:#fff;border:0;border-radius:8px;padding:8px 10px;font-weight:700;cursor:pointer}
-  .btn:disabled{opacity:.6;cursor:not-allowed}
-  .muted{color:#64748b}
-  .pill{display:inline-block;background:#f1f5f9;color:#0f172a;border-radius:999px;padding:2px 8px;font-size:12px}
-  #finance{position:fixed;bottom:10px;left:10px;z-index:1100;background:#fff;border-radius:10px;padding:8px 12px;box-shadow:0 4px 12px rgba(0,0,0,.2);font-weight:700}
-  #status{position:fixed;bottom:10px;right:10px;z-index:1100;background:#fff;border-radius:10px;padding:8px 12px;box-shadow:0 4px 12px rgba(0,0,0,.2);font-size:12px}
-  @media (max-width:480px){#menu{width:86vw;transform:translateX(-88vw)}}
+html,body{height:100%;margin:0}
+#map{height:100%}
+#hamburger{position:fixed;top:10px;left:10px;z-index:1100;background:#111;color:#fff;border:0;border-radius:12px;padding:10px 12px;font-size:18px;box-shadow:0 4px 12px rgba(0,0,0,.2);cursor:pointer}
+#menu{position:fixed;top:0;left:0;height:100%;width:340px;z-index:1000;background:#fff;box-shadow:2px 0 16px rgba(0,0,0,.15);transform:translateX(-360px);transition:transform .25s ease;padding:12px;overflow-y:auto}
+#menu.open{transform:translateX(0)}
+.offer{border:1px solid #e5e7eb;border-radius:10px;padding:10px;margin:8px 0}
+.btn{display:inline-block;background:#0ea5e9;color:#fff;border:0;border-radius:8px;padding:8px 10px;font-weight:700;cursor:pointer}
+.btn:disabled{opacity:.6;cursor:not-allowed}
+.muted{color:#64748b}
+.pill{display:inline-block;background:#f1f5f9;color:#0f172a;border-radius:999px;padding:2px 8px;font-size:12px}
+#finance{
+  position:fixed;
+  top:10px;
+  right:10px;
+  z-index:1100;
+  background:#fff;
+  border-radius:10px;
+  padding:8px 12px;
+  box-shadow:0 4px 12px rgba(0,0,0,.2);
+  font-weight:700;
+}
+#status{position:fixed;bottom:10px;right:10px;z-index:1100;background:#fff;border-radius:10px;padding:8px 12px;box-shadow:0 4px 12px rgba(0,0,0,.2);font-size:12px}
+@media (max-width:480px){#menu{width:86vw;transform:translateX(-88vw)}}
 </style>
 </head>
 <body>
@@ -73,7 +83,7 @@ setOnlineBadge();
 
 /* ===================== INDEXEDDB ===================== */
 const DB_NAME = 'TransportDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 let db;
 
 function openDB(){
@@ -81,14 +91,11 @@ function openDB(){
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = (e)=>{
       const db = e.target.result;
-      // Lines store
       const lines = db.createObjectStore('lines', { keyPath: 'id' });
       lines.createIndex('type', 'type', { unique:false });
       lines.createIndex('owned', 'owned', { unique:false });
       lines.createIndex('bboxKey', 'bboxKey', { unique:false });
-      // Meta store
       const meta = db.createObjectStore('meta', { keyPath: 'key' });
-      // owned store (optional redundancy)
       db.createObjectStore('owned', { keyPath: 'id' });
     };
     req.onsuccess = ()=> resolve(req.result);
@@ -100,11 +107,10 @@ async function putLines(lines){
   return new Promise((resolve,reject)=>{
     const tx = db.transaction(['lines'], 'readwrite');
     const store = tx.objectStore('lines');
-    lines.forEach(l => {
-      // zaručíme, že má vždy owned (boolean) a platné id
-      if(l.id === undefined || l.id === null) l.id = crypto.randomUUID();
-      if(typeof l.owned === 'undefined') l.owned = false;
-      store.put(l);
+    lines.forEach(l=>{
+      // fallback klíč
+      const key = l.id || crypto.randomUUID();
+      store.put({...l, id:key, owned:l.owned===true});
     });
     tx.oncomplete = ()=> resolve();
     tx.onerror = ()=> reject(tx.error);
@@ -131,88 +137,121 @@ function markOwned(id){
 }
 
 function countStore(storeName, indexName, query){
-  // jednoduchý wrapper, ale nevoláme sem riskantní IDBKeyRange
   return new Promise((resolve,reject)=>{
     const tx = db.transaction([storeName], 'readonly');
     const store = tx.objectStore(storeName);
-    const req = store.count();
+    const source = indexName ? store.index(indexName) : store;
+    const req = source.count(query || null);
     req.onsuccess = ()=> resolve(req.result);
     req.onerror = ()=> reject(req.error);
   });
 }
 
-/** Z DB vytáhne náhodnou linku, která NENÍ owned ani nyní nabízená */
-const OFFERING = new Set(); // jen ID pro UI
+/* ===================== NABÍZENÍ LINEK (z DB) ===================== */
+let ownedCount = 0;
+
+function updateBadges(){
+  offeredCountEl.textContent = `${OFFERING.size} v nabídce`;
+  ownedCountEl.textContent = `${ownedCount} koupeno`;
+
+  // bezpečné počítání linky, které nejsou owned
+  countStoreSafe('lines', 'owned').then(c=>{
+    poolCountEl.textContent = `${c} v DB`;
+  }).catch(err=>{
+    console.warn("Chyba při čtení z DB:", err);
+    poolCountEl.textContent = `? v DB`;
+  });
+}
+
+/* bezpečné počítání z IndexedDB */
+function countStoreSafe(storeName, indexName){
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction([storeName], 'readonly');
+    const store = tx.objectStore(storeName);
+    const index = indexName ? store.index(indexName) : store;
+
+    let count = 0;
+    const req = index.openCursor();
+    req.onsuccess = e=>{
+      const cur = e.target.result;
+      if(!cur){ resolve(count); return; }
+      if(indexName){
+        if(cur.value[indexName] === false) count++;
+      } else {
+        count++;
+      }
+      cur.continue();
+    };
+    req.onerror = e=> reject(e.target.error);
+  });
+}
+
+/* ===================== PERSISTENCE STAŽENÝCH DLAŽDIC ===================== */
+async function loadTilesDone(){
+  const tx = db.transaction(['meta'], 'readonly');
+  const store = tx.objectStore('meta');
+  return new Promise((resolve,reject)=>{
+    const req = store.get('tilesDone');
+    req.onsuccess = ()=>{
+      if(req.result && Array.isArray(req.result.value)){
+        req.result.value.forEach(k=>tilesDone.add(k));
+      }
+      resolve();
+    };
+    req.onerror = ()=>resolve(); // ignorovat chybu
+  });
+}
+
+async function saveTilesDone(){
+  const tx = db.transaction(['meta'], 'readwrite');
+  const store = tx.objectStore('meta');
+  await store.put({ key:'tilesDone', value:[...tilesDone] });
+}
+
+const OFFERING = new Set();
+
 async function getRandomOfferableLine(maxScan=600){
   return new Promise((resolve,reject)=>{
-    const tx = db.transaction(['lines'], 'readonly');
+    const tx = db.transaction(['lines'],'readonly');
     const store = tx.objectStore('lines');
     const req = store.openCursor();
-    let seen = 0;
-    let choice = null; let choiceCount = 0;
+    let seen=0, choice=null, choiceCount=0;
     req.onsuccess = ()=>{
       const cur = req.result;
       if(!cur || seen>=maxScan){ return resolve(choice); }
       const val = cur.value;
-      // pokud val.owned je undefined -> bereme jako false
-      const isOwned = !!val.owned;
-      if(!isOwned && !OFFERING.has(val.id)){
-        // reservoir sampling
+      if(!val.owned && !OFFERING.has(val.id)){
         choiceCount++;
-        if(Math.random() < 1/choiceCount) choice = val;
+        if(Math.random()<1/choiceCount) choice=val;
       }
       seen++;
       cur.continue();
     };
-    req.onerror = ()=> reject(req.error);
-  });
-}
-
-/* new: bezpečné spočítání záznamů bez owned (cursor) */
-function countNonOwned(){
-  return new Promise((resolve,reject)=>{
-    const tx = db.transaction(['lines'], 'readonly');
-    const store = tx.objectStore('lines');
-    const req = store.openCursor();
-    let cnt = 0;
-    req.onsuccess = ()=>{
-      const cur = req.result;
-      if(!cur){ resolve(cnt); return; }
-      const val = cur.value;
-      if(!val.owned) cnt++;
-      cur.continue();
-    };
-    req.onerror = ()=> reject(req.error);
+    req.onerror = ()=>reject(req.error);
   });
 }
 
 /* ===================== OVERPASS + TILING ===================== */
-// Central Europe rough bbox:
 const CE = { south: 36.0, north: 68.0, west: -9.5, east: 30.0 };
-// ~50 km step: 1° lat ~ 111 km, lon step varies by cosφ
 function generateTiles(region=CE, km=50){
-  const tiles = [];
-  const dLat = km/111; // degrees
+  const tiles=[];
+  const dLat=km/111;
   for(let lat=region.south; lat<region.north; lat+=dLat){
-    const phi = (lat*Math.PI)/180;
-    const dLon = km/(111*Math.cos(phi));
+    const phi = lat*Math.PI/180;
+    const dLon=km/(111*Math.cos(phi));
     for(let lon=region.west; lon<region.east; lon+=dLon){
-      const s=lat, n=Math.min(lat+dLat, region.north);
-      const w=lon, e=Math.min(lon+dLon, region.east);
+      const s=lat, n=Math.min(lat+dLat,region.north), w=lon, e=Math.min(lon+dLon,region.east);
       tiles.push({s,w,n,e});
     }
   }
   return tiles;
 }
-const TILES = generateTiles(CE, 50);
-let tilesDone = new Set(); // runtime; perzistence lze dopsat do meta
+const TILES = generateTiles(CE,50);
+let tilesDone = new Set(); // runtime
 updateTilesBadge();
 
 function bboxKey(t){ return `${t.s.toFixed(3)},${t.w.toFixed(3)},${t.n.toFixed(3)},${t.e.toFixed(3)}`; }
-
-function updateTilesBadge(){
-  tilesCountEl.textContent = `${tilesDone.size}/${TILES.length} dlaždic`;
-}
+function updateTilesBadge(){ tilesCountEl.textContent = `${tilesDone.size}/${TILES.length} dlaždic`; }
 
 async function overpassJSON(query){
   const res = await fetch('https://overpass-api.de/api/interpreter', { method:'POST', body:query });
@@ -243,62 +282,63 @@ function normalizeType(tags){
   return 'bus';
 }
 
+/* ===================== PERSISTENT TILES ===================== */
+async function loadTilesDone(){
+  const tx = db.transaction('meta','readonly');
+  const store = tx.objectStore('meta');
+  return new Promise(resolve=>{
+    const req = store.get('tilesDone');
+    req.onsuccess = ()=>{ if(req.result && Array.isArray(req.result.value)) tilesDone=new Set(req.result.value); resolve(); };
+    req.onerror = ()=>resolve();
+  });
+}
+
+async function saveTilesDone(){
+  const tx = db.transaction('meta','readwrite');
+  const store = tx.objectStore('meta');
+  store.put({key:'tilesDone', value:[...tilesDone]});
+}
+
+/* ===================== FETCH TILE ===================== */
 async function fetchTileToDB(tile){
-  const key = bboxKey(tile);
+  const key=bboxKey(tile);
+  if(tilesDone.has(key)) return;
   setStatus(`Stahuji dlaždici ${key}…`);
-  const q = `
-    [out:json][timeout:90];
-    (
-      relation["route"~"^(bus|tram|train|air|flight)$"](${tile.s},${tile.w},${tile.n},${tile.e});
-    );
-    out body;
-    >;
-    out skel qt;
-  `;
+  const q=`[out:json][timeout:90];(relation["route"~"^(bus|tram|train|air|flight)$"](${tile.s},${tile.w},${tile.n},${tile.e});); out body; >; out skel qt;`;
   try{
     const json = await overpassJSON(q);
     const nodesById = {};
     (json.elements||[]).forEach(el=>{ if(el.type==='node') nodesById[el.id]=el; });
     const rels = (json.elements||[]).filter(el=>el.type==='relation');
-    const toStore = [];
+    const toStore=[];
     for(const rel of rels){
-      const coords = extractStopsOrdered(rel, nodesById);
+      const coords = extractStopsOrdered(rel,nodesById);
       if(coords.length<2) continue;
       const km = polylineKm(coords);
-      if(!isFinite(km) || km<=0) continue;
+      if(!isFinite(km)||km<=0) continue;
       const type = normalizeType(rel.tags||{});
       const name = rel.tags && rel.tags.name ? rel.tags.name : `Linka ${rel.id}`;
-      const price = Math.max(1, Math.round(km*10)); // 10 Kč/km
-      toStore.push({
-        id: rel.id,
-        type, name, coords, km, price,
-        bboxKey: key,
-        owned: false,
-        tags: rel.tags||{}
-      });
+      const price = Math.max(1, Math.round(km*10));
+      toStore.push({id:rel.id,type,name,coords,km,price,bboxKey:key,owned:false,tags:rel.tags||{}});
     }
     if(toStore.length) await putLines(toStore);
     tilesDone.add(key);
+    saveTilesDone();
     updateTilesBadge();
-    setStatus(`Načteno ${toStore.length} linek z dlaždice ${key}`);
-  }catch(e){
-    console.warn('Tile fetch failed', e);
-    setStatus('Chyba při načítání dlaždice (konzole).');
-  }
+  }catch(e){ console.warn('Tile fetch failed',e); }
 }
 
-/* sekvenční stahování dlaždic (šetřené) */
+/* sekvenční stahování dlaždic */
 async function sequentialPrefetch(delayMs=5000, firstBurst=3){
-  // rychlý úvod
   for(let i=0;i<firstBurst && i<TILES.length;i++){
     if(!navigator.onLine) break;
     await fetchTileToDB(TILES[i]);
   }
-  // pak klidně dokola
-  let idx = firstBurst;
+
+let idx = firstBurst;
   const loop = async ()=>{
     if(!navigator.onLine){ setStatus('offline – načítání pozastaveno'); return; }
-    if(idx>=TILES.length) idx=0;
+    if(idx >= TILES.length) idx = 0;
     const t = TILES[idx++];
     if(!tilesDone.has(bboxKey(t))){
       await fetchTileToDB(t);
@@ -308,24 +348,7 @@ async function sequentialPrefetch(delayMs=5000, firstBurst=3){
   setTimeout(loop, delayMs);
 }
 
-/* ===================== NABÍZENÍ LINEK (z DB) ===================== */
-let ownedCount = 0;
-function updateBadges(){
-  offeredCountEl.textContent = `${OFFERING.size} v nabídce`;
-  ownedCountEl.textContent = `${ownedCount} koupeno`;
-
-  // Bezpečné počítání ne-vlastněných záznamů (cursor) místo IDBKeyRange.only(false)
-  countNonOwned().then(c=>{
-    poolCountEl.textContent = `${c} v DB`;
-  }).catch(err=>{
-    console.warn('countNonOwned failed', err);
-    // fallback: prostý count všech záznamů
-    countStore('lines').then(c=>{
-      poolCountEl.textContent = `${c} v DB (celkem)`;
-    }).catch(()=>{ poolCountEl.textContent = '—'; });
-  });
-}
-
+/* ===================== SPAWN + VEHICLES ===================== */
 function iconForType(t){
   if(t==='tram') return TRAM_ICON;
   if(t==='train') return TRAIN_ICON;
@@ -335,7 +358,7 @@ function iconForType(t){
 
 /* plynulé pendlování + výdělek za projetý km (12 Kč/km) */
 function runVehiclePendulum(marker, coords, speedKmh=70, ratePerKm=12){
-  const speed = (speedKmh*1000)/3600; // m/s
+  const speed = (speedKmh*1000)/3600;
   const seg = [];
   for(let i=0;i<coords.length-1;i++){
     const a=L.latLng(coords[i]), b=L.latLng(coords[i+1]);
@@ -349,7 +372,6 @@ function runVehiclePendulum(marker, coords, speedKmh=70, ratePerKm=12){
   setInterval(()=>{
     dist+=step;
     while(dist>seg[idx].d && seg[idx].d>0){
-      // dokončen segment → přičti výdělek
       const earn = (seg[idx].d/1000) * ratePerKm;
       setMoney(Math.round(money + earn));
       dist-=seg[idx].d;
@@ -367,16 +389,18 @@ function runVehiclePendulum(marker, coords, speedKmh=70, ratePerKm=12){
 function spawnVehicle(line){
   const marker = L.marker(line.coords[0], { icon: iconForType(line.type) }).addTo(map);
 
-  // vždy při kliknutí zobraz polyline + popup; při zavření popupu polyline skryj
+  let poly;
   marker.on('click', ()=>{
-    const poly = L.polyline(line.coords, { color:'blue' }).addTo(map);
+    if(poly) map.removeLayer(poly);
+    poly = L.polyline(line.coords, { color:'blue' }).addTo(map);
     marker.bindPopup(`🚍 <b>${line.name}</b><br><small>${line.type.toUpperCase()} • ID ${line.id}</small>`).openPopup();
-    marker.once('popupclose', ()=>{ try{ map.removeLayer(poly); }catch(_){} });
+    marker.once('popupclose', ()=>{ try{ map.removeLayer(poly); poly=null; }catch(_){} });
   });
 
   runVehiclePendulum(marker, line.coords, 70, 12);
 }
 
+/* ===================== NABÍDKA LINEK ===================== */
 async function offerOneFromDB(){
   const line = await getRandomOfferableLine();
   if(!line){ updateBadges(); return; }
@@ -385,7 +409,7 @@ async function offerOneFromDB(){
 
   const card = document.createElement('div');
   card.className='offer'; card.id=`offer-${line.id}`;
-  card.innerHTML = `
+  card.innerHTML=`
     <b>${line.name}</b> <span class="pill">${line.type}</span><br/>
     <span class="muted">ID ${line.id}</span><br/>
     <span class="muted">Délka: ${line.km.toFixed(1)} km</span><br/>
@@ -405,22 +429,23 @@ async function offerOneFromDB(){
   offersEl.appendChild(card);
 }
 
-setInterval(offerOneFromDB, 10000); // každých 10 s
+setInterval(offerOneFromDB, 10000);
 
 /* ===================== BOOTSTRAP ===================== */
 (async function(){
   db = await openDB();
-  setStatus('DB připravena. Startuji načítání dlaždic…');
+  setStatus('DB připravena. Načítám info o stažených dlaždicích…');
+  await loadTilesDone();
+  updateTilesBadge();
   updateBadges();
-  // rychlé ověření: kolik je už v DB (např. po reloadu)
-  updateBadges();
+
   if(navigator.onLine){
-    sequentialPrefetch(7000, 3); // každých 7s jedna dlaždice, na start 3
+    sequentialPrefetch(7000,3);
   } else {
     setStatus('offline – používám pouze IndexedDB');
   }
 })();
-
 </script>
 </body>
 </html>
+
