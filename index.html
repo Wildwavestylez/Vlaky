@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8" />
+<title>Transport Tycoon – IndexedDB (CZ/DE/AT)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<style>
+  html,body{height:100%;margin:0}
+  #map{height:100%}
+  #hamburger{position:fixed;top:10px;left:10px;z-index:1100;background:#111;color:#fff;border:0;border-radius:12px;padding:10px 12px;font-size:18px;box-shadow:0 4px 12px rgba(0,0,0,.2);cursor:pointer}
+  #menu{position:fixed;top:0;left:0;height:100%;width:340px;z-index:1000;background:#fff;box-shadow:2px 0 16px rgba(0,0,0,.15);transform:translateX(-360px);transition:transform .25s ease;padding:12px;overflow-y:auto}
+  #menu.open{transform:translateX(0)}
+  .offer{border:1px solid #e5e7eb;border-radius:10px;padding:10px;margin:8px 0}
+  .btn{display:inline-block;background:#0ea5e9;color:#fff;border:0;border-radius:8px;padding:8px 10px;font-weight:700;cursor:pointer}
+  .btn:disabled{opacity:.6;cursor:not-allowed}
+  .muted{color:#64748b}
+  .pill{display:inline-block;background:#f1f5f9;color:#0f172a;border-radius:999px;padding:2px 8px;font-size:12px}
+  #finance{position:fixed;bottom:10px;left:10px;z-index:1100;background:#fff;border-radius:10px;padding:8px 12px;box-shadow:0 4px 12px rgba(0,0,0,.2);font-weight:700}
+  #status{position:fixed;bottom:10px;right:10px;z-index:1100;background:#fff;border-radius:10px;padding:8px 12px;box-shadow:0 4px 12px rgba(0,0,0,.2);font-size:12px}
+  @media (max-width:480px){#menu{width:86vw;transform:translateX(-88vw)}}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<button id="hamburger">☰</button>
+<aside id="menu">
+  <h2 style="margin:6px 0 8px">Transport Tycoon (offline-ready)</h2>
+  <div class="muted" style="font-size:12px;margin-bottom:6px">
+    Data se stahují po ~50×50 km dlaždicích do IndexedDB. Každých 10 s dostaneš náhodnou linku z DB. Po koupi se už nenabízí.
+  </div>
+  <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap">
+    <span class="pill" id="poolCount">0 v DB</span>
+    <span class="pill" id="offeredCount">0 v nabídce</span>
+    <span class="pill" id="ownedCount">0 koupeno</span>
+    <span class="pill" id="tilesCount">0/0 dlaždic</span>
+    <span class="pill" id="onlineBadge">stav: ?</span>
+  </div>
+  <div id="offers"></div>
+</aside>
+<div id="finance">💰 Peníze: <span id="money">20000</span> Kč</div>
+<div id="status">⌛ inicializuji…</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+/* ===================== MAPA ===================== */
+const map = L.map('map', { worldCopyJump:true }).setView([49.0, 13.3], 6);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OpenStreetMap' }).addTo(map);
+document.getElementById('hamburger').onclick = () => document.getElementById('menu').classList.toggle('open');
+
+const BUS_ICON = L.icon({ iconUrl:"https://cdn-icons-png.flaticon.com/512/61/61212.png", iconSize:[24,24] });
+const TRAM_ICON= L.icon({ iconUrl:"https://cdn-icons-png.flaticon.com/512/2847/2847720.png", iconSize:[24,24] });
+const TRAIN_ICON=L.icon({ iconUrl:"https://cdn-icons-png.flaticon.com/512/854/854894.png", iconSize:[24,24] });
+const PLANE_ICON=L.icon({ iconUrl:"https://cdn-icons-png.flaticon.com/512/34/34627.png", iconSize:[24,24] });
+
+/* ===================== UI STATE ===================== */
+let money = 20000;
+const moneyEl = document.getElementById('money');
+const offersEl = document.getElementById('offers');
+const poolCountEl = document.getElementById('poolCount');
+const offeredCountEl = document.getElementById('offeredCount');
+const ownedCountEl = document.getElementById('ownedCount');
+const tilesCountEl = document.getElementById('tilesCount');
+const statusEl = document.getElementById('status');
+const onlineBadge = document.getElementById('onlineBadge');
+
+function setMoney(v){ money=v; moneyEl.textContent = money; }
+function setStatus(txt){ statusEl.textContent = txt; }
+function setOnlineBadge(){ onlineBadge.textContent = navigator.onLine ? 'online' : 'offline'; }
+window.addEventListener('online', setOnlineBadge);
+window.addEventListener('offline', setOnlineBadge);
+setOnlineBadge();
+
+/* ===================== INDEXEDDB ===================== */
+const DB_NAME = 'TransportDB';
+const DB_VERSION = 1;
+let db;
+
+function openDB(){
+  return new Promise((resolve, reject)=>{
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e)=>{
+      const db = e.target.result;
+      // Lines store
+      const lines = db.createObjectStore('lines', { keyPath: 'id' });
+      lines.createIndex('type', 'type', { unique:false });
+      lines.createIndex('owned', 'owned', { unique:false });
+      lines.createIndex('bboxKey', 'bboxKey', { unique:false });
+      // Meta store
+      const meta = db.createObjectStore('meta', { keyPath: 'key' });
+      // owned store (optional redundancy)
+      db.createObjectStore('owned', { keyPath: 'id' });
+    };
+    req.onsuccess = ()=> resolve(req.result);
+    req.onerror = ()=> reject(req.error);
+  });
+}
+
+async function putLines(lines){
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(['lines'], 'readwrite');
+    const store = tx.objectStore('lines');
+    lines.forEach(l => store.put(l));
+    tx.oncomplete = ()=> resolve();
+    tx.onerror = ()=> reject(tx.error);
+  });
+}
+
+function markOwned(id){
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(['lines','owned'], 'readwrite');
+    const s = tx.objectStore('lines');
+    const o = tx.objectStore('owned');
+    const getReq = s.get(id);
+    getReq.onsuccess = ()=>{
+      const rec = getReq.result;
+      if(rec){
+        rec.owned = true;
+        s.put(rec);
+        o.put({id});
+      }
+    };
+    tx.oncomplete = ()=> resolve();
+    tx.onerror = ()=> reject(tx.error);
+  });
+}
+
+function countStore(storeName, indexName, query){
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction([storeName], 'readonly');
+    const store = tx.objectStore(storeName);
+    const source = indexName ? store.index(indexName) : store;
+    const req = source.count(query || null);
+    req.onsuccess = ()=> resolve(req.result);
+    req.onerror = ()=> reject(req.error);
+  });
+}
+
+/** Z DB vytáhne náhodnou linku, která NENÍ owned ani nyní nabízená */
+const OFFERING = new Set(); // jen ID pro UI
+async function getRandomOfferableLine(maxScan=600){
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(['lines'], 'readonly');
+    const store = tx.objectStore('lines');
+    const req = store.openCursor();
+    let seen = 0;
+    let choice = null; let choiceCount = 0;
+    req.onsuccess = ()=>{
+      const cur = req.result;
+      if(!cur || seen>=maxScan){ return resolve(choice); }
+      const val = cur.value;
+      if(!val.owned && !OFFERING.has(val.id)){
+        // reservoir sampling
+        choiceCount++;
+        if(Math.random() < 1/choiceCount) choice = val;
+      }
+      seen++;
+      cur.continue();
+    };
+    req.onerror = ()=> reject(req.error);
+  });
+}
+
+/* ===================== OVERPASS + TILING ===================== */
+// Central Europe rough bbox:
+const CE = { south: 45.0, north: 55.0, west: 5.0, east: 20.0 };
+// ~50 km step: 1° lat ~ 111 km, lon step varies by cosφ
+function generateTiles(region=CE, km=50){
+  const tiles = [];
+  const dLat = km/111; // degrees
+  for(let lat=region.south; lat<region.north; lat+=dLat){
+    const phi = (lat*Math.PI)/180;
+    const dLon = km/(111*Math.cos(phi));
+    for(let lon=region.west; lon<region.east; lon+=dLon){
+      const s=lat, n=Math.min(lat+dLat, region.north);
+      const w=lon, e=Math.min(lon+dLon, region.east);
+      tiles.push({s,w,n,e});
+    }
+  }
+  return tiles;
+}
+const TILES = generateTiles(CE, 50);
+let tilesDone = new Set(); // runtime; perzistence lze dopsat do meta
+updateTilesBadge();
+
+function bboxKey(t){ return `${t.s.toFixed(3)},${t.w.toFixed(3)},${t.n.toFixed(3)},${t.e.toFixed(3)}`; }
+
+function updateTilesBadge(){
+  tilesCountEl.textContent = `${tilesDone.size}/${TILES.length} dlaždic`;
+}
+
+async function overpassJSON(query){
+  const res = await fetch('https://overpass-api.de/api/interpreter', { method:'POST', body:query });
+  if(!res.ok) throw new Error(`Overpass ${res.status}`);
+  return res.json();
+}
+
+function extractStopsOrdered(rel, nodesById){
+  const isStopRole = r => r==='stop'||r==='stop_entry_only'||r==='stop_exit_only';
+  const isPlatRole = r => r==='platform'||r==='platform_entry_only'||r==='platform_exit_only';
+  const mem = rel.members||[];
+  let stops = mem.filter(m=>m.type==='node'&&isStopRole(m.role)).map(m=>nodesById[m.ref]).filter(Boolean);
+  if(stops.length<2){
+    stops = mem.filter(m=>m.type==='node'&&isPlatRole(m.role)).map(m=>nodesById[m.ref]).filter(Boolean);
+  }
+  return stops.length>=2 ? stops.map(s=>[s.lat,s.lon]) : [];
+}
+
+function distanceKm(a,b){ return L.latLng(a).distanceTo(L.latLng(b))/1000; }
+function polylineKm(coords){ let d=0; for(let i=1;i<coords.length;i++) d+=distanceKm(coords[i-1],coords[i]); return d; }
+
+function normalizeType(tags){
+  const t = (tags && tags.route) ? String(tags.route) : '';
+  if(/bus/i.test(t)) return 'bus';
+  if(/tram/i.test(t)) return 'tram';
+  if(/train|rail/i.test(t)) return 'train';
+  if(/air|flight/i.test(t)) return 'plane';
+  return 'bus';
+}
+
+async function fetchTileToDB(tile){
+  const key = bboxKey(tile);
+  setStatus(`Stahuji dlaždici ${key}…`);
+  const q = `
+    [out:json][timeout:90];
+    (
+      relation["route"~"^(bus|tram|train|air|flight)$"](${tile.s},${tile.w},${tile.n},${tile.e});
+    );
+    out body;
+    >;
+    out skel qt;
+  `;
+  try{
+    const json = await overpassJSON(q);
+    const nodesById = {};
+    (json.elements||[]).forEach(el=>{ if(el.type==='node') nodesById[el.id]=el; });
+    const rels = (json.elements||[]).filter(el=>el.type==='relation');
+    const toStore = [];
+    for(const rel of rels){
+      const coords = extractStopsOrdered(rel, nodesById);
+      if(coords.length<2) continue;
+      const km = polylineKm(coords);
+      if(!isFinite(km) || km<=0) continue;
+      const type = normalizeType(rel.tags||{});
+      const name = rel.tags && rel.tags.name ? rel.tags.name : `Linka ${rel.id}`;
+      const price = Math.max(1, Math.round(km*10)); // 10 Kč/km
+      toStore.push({
+        id: rel.id,
+        type, name, coords, km, price,
+        bboxKey: key,
+        owned: false,
+        tags: rel.tags||{}
+      });
+    }
+    if(toStore.length) await putLines(toStore);
+    tilesDone.add(key);
+    updateTilesBadge();
+  }catch(e){
+    console.warn('Tile fetch failed', e);
+  }
+}
+
+/* sekvenční stahování dlaždic (šetřené) */
+async function sequentialPrefetch(delayMs=5000, firstBurst=3){
+  // rychlý úvod
+  for(let i=0;i<firstBurst && i<TILES.length;i++){
+    if(!navigator.onLine) break;
+    await fetchTileToDB(TILES[i]);
+  }
+  // pak klidně dokola
+  let idx = firstBurst;
+  const loop = async ()=>{
+    if(!navigator.onLine){ setStatus('offline – načítání pozastaveno'); return; }
+    if(idx>=TILES.length) idx=0;
+    const t = TILES[idx++];
+    if(!tilesDone.has(bboxKey(t))){
+      await fetchTileToDB(t);
+    }
+    setTimeout(loop, delayMs);
+  };
+  setTimeout(loop, delayMs);
+}
+
+/* ===================== NABÍZENÍ LINEK (z DB) ===================== */
+let ownedCount = 0;
+function updateBadges(){
+  offeredCountEl.textContent = `${OFFERING.size} v nabídce`;
+  ownedCountEl.textContent = `${ownedCount} koupeno`;
+  // hrubý odhad celku v DB (bez owned) – jen informativně
+  countStore('lines','owned', IDBKeyRange.only(false)).then(c=>{
+    poolCountEl.textContent = `${c} v DB`;
+  }).catch(()=>{});
+}
+
+function iconForType(t){
+  if(t==='tram') return TRAM_ICON;
+  if(t==='train') return TRAIN_ICON;
+  if(t==='plane') return PLANE_ICON;
+  return BUS_ICON;
+}
+
+/* plynulé pendlování + výdělek za projetý km (12 Kč/km) */
+function runVehiclePendulum(marker, coords, speedKmh=70, ratePerKm=12){
+  const speed = (speedKmh*1000)/3600; // m/s
+  const seg = [];
+  for(let i=0;i<coords.length-1;i++){
+    const a=L.latLng(coords[i]), b=L.latLng(coords[i+1]);
+    const d=a.distanceTo(b);
+    if(d>0) seg.push({a,b,d});
+  }
+  if(seg.length===0) return;
+  let idx=0, dist=0, dir=1;
+  const tick=50; const step=speed*(tick/1000);
+
+  setInterval(()=>{
+    dist+=step;
+    while(dist>seg[idx].d && seg[idx].d>0){
+      // dokončen segment → přičti výdělek
+      const earn = (seg[idx].d/1000) * ratePerKm;
+      setMoney(Math.round(money + earn));
+      dist-=seg[idx].d;
+      idx+=dir;
+      if(idx>=seg.length){ dir=-1; idx=seg.length-1; dist=0; }
+      if(idx<0){ dir=1; idx=0; dist=0; }
+    }
+    const s = seg[idx].d===0?0:dist/seg[idx].d;
+    const lat = seg[idx].a.lat + (seg[idx].b.lat - seg[idx].a.lat)*s;
+    const lng = seg[idx].a.lng + (seg[idx].b.lng - seg[idx].a.lng)*s;
+    marker.setLatLng([lat,lng]);
+  }, tick);
+}
+
+function spawnVehicle(line){
+  const marker = L.marker(line.coords[0], { icon: iconForType(line.type) }).addTo(map);
+
+  // vždy při kliknutí zobraz polyline + popup; při zavření popupu polyline skryj
+  marker.on('click', ()=>{
+    const poly = L.polyline(line.coords, { color:'blue' }).addTo(map);
+    marker.bindPopup(`🚍 <b>${line.name}</b><br><small>${line.type.toUpperCase()} • ID ${line.id}</small>`).openPopup();
+    marker.once('popupclose', ()=>{ try{ map.removeLayer(poly); }catch(_){} });
+  });
+
+  runVehiclePendulum(marker, line.coords, 70, 12);
+}
+
+async function offerOneFromDB(){
+  const line = await getRandomOfferableLine();
+  if(!line){ updateBadges(); return; }
+  OFFERING.add(line.id);
+  updateBadges();
+
+  const card = document.createElement('div');
+  card.className='offer'; card.id=`offer-${line.id}`;
+  card.innerHTML = `
+    <b>${line.name}</b> <span class="pill">${line.type}</span><br/>
+    <span class="muted">ID ${line.id}</span><br/>
+    <span class="muted">Délka: ${line.km.toFixed(1)} km</span><br/>
+    <span class="muted">Cena: ${line.price} Kč</span><br/>
+    <button class="btn">Koupit</button>
+  `;
+  const btn = card.querySelector('button');
+  btn.onclick = async ()=>{
+    if(money < line.price){ alert('Nemáš dost peněz!'); return; }
+    setMoney(money - line.price);
+    await markOwned(line.id);
+    OFFERING.delete(line.id);
+    ownedCount++; updateBadges();
+    card.remove();
+    spawnVehicle(line);
+  };
+  offersEl.appendChild(card);
+}
+
+setInterval(offerOneFromDB, 10000); // každých 10 s
+
+/* ===================== BOOTSTRAP ===================== */
+(async function(){
+  db = await openDB();
+  setStatus('DB připravena. Startuji načítání dlaždic…');
+  updateBadges();
+  // rychlé ověření: kolik je už v DB (např. po reloadu)
+  updateBadges();
+  if(navigator.onLine){
+    sequentialPrefetch(7000, 3); // každých 7s jedna dlaždice, na start 3
+  } else {
+    setStatus('offline – používám pouze IndexedDB');
+  }
+})();
+</script>
+</body>
+</html>
