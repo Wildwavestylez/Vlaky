@@ -329,22 +329,46 @@ async function fetchTileToDB(tile){
 }
 
 /* sekvenční stahování dlaždic */
+/* sekvenční stahování dlaždic (šetřené) */
 async function sequentialPrefetch(delayMs=5000, firstBurst=3){
-  for(let i=0;i<firstBurst && i<TILES.length;i++){
-    if(!navigator.onLine) break;
-    await fetchTileToDB(TILES[i]);
+  // rychlý úvod – první dlaždice, které ještě nejsou stažené
+  for(let i=0, added=0; i<TILES.length && added<firstBurst; i++){
+    const t = TILES[i];
+    if(!tilesDone.has(bboxKey(t))){
+      if(!navigator.onLine) break;
+      await fetchTileToDB(t);
+      await saveTilesDone();
+      added++;
+    }
   }
 
-let idx = firstBurst;
+  // pak klidně dokola
+  let idx = 0;
   const loop = async ()=>{
-    if(!navigator.onLine){ setStatus('offline – načítání pozastaveno'); return; }
-    if(idx >= TILES.length) idx = 0;
-    const t = TILES[idx++];
-    if(!tilesDone.has(bboxKey(t))){
-      await fetchTileToDB(t);
+    if(!navigator.onLine){ 
+      setStatus('offline – načítání pozastaveno'); 
+      return; 
     }
-    setTimeout(loop, delayMs);
+
+    let found = false;
+    const total = TILES.length;
+    for(let attempts=0; attempts<total; attempts++){
+      const t = TILES[idx++ % total];
+      if(!tilesDone.has(bboxKey(t))){
+        await fetchTileToDB(t);
+        await saveTilesDone();
+        found = true;
+        break;
+      }
+    }
+
+    if(!found){
+      setStatus('všechny dlaždice již staženy – hra pokračuje');
+    } else {
+      setTimeout(loop, delayMs);
+    }
   };
+
   setTimeout(loop, delayMs);
 }
 
@@ -448,4 +472,3 @@ setInterval(offerOneFromDB, 10000);
 </script>
 </body>
 </html>
-
