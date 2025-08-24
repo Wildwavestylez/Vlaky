@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<title>Bus Tycoon CZ/DE</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<style>
+html,body{height:100%;margin:0;}
+#map{height:100%;}
+#hamburger{position:fixed;top:10px;left:10px;z-index:1100;background:#111;color:#fff;border:0;border-radius:12px;padding:10px 12px;font-size:18px;box-shadow:0 4px 12px rgba(0,0,0,.2);cursor:pointer;}
+#menu{position:fixed;top:0;left:0;height:100%;width:320px;z-index:1000;background:#fff;box-shadow:2px 0 16px rgba(0,0,0,.15);transform:translateX(-340px);transition:transform .25s ease;padding:12px;overflow-y:auto;}
+#menu.open{transform:translateX(0);}
+.offer{border:1px solid #e5e7eb;border-radius:10px;padding:10px;margin:8px 0;}
+.btn{display:inline-block;background:#0ea5e9;color:#fff;border:0;border-radius:8px;padding:8px 10px;font-weight:700;cursor:pointer;}
+.btn:disabled{opacity:.6;cursor:not-allowed;}
+.muted{color:#64748b;}
+.pill{display:inline-block;background:#f1f5f9;color:#0f172a;border-radius:999px;padding:2px 8px;font-size:12px;}
+#finance{position:fixed;bottom:10px;left:10px;z-index:1100;background:#fff;border-radius:10px;padding:8px 12px;box-shadow:0 4px 12px rgba(0,0,0,.2);font-weight:700;}
+@media (max-width:480px){#menu{width:86vw;transform:translateX(-88vw);}}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<button id="hamburger">☰</button>
+<aside id="menu">
+<h2 style="margin:6px 0 8px">Autobusová hra</h2>
+<div class="muted" style="font-size:12px;margin-bottom:6px">
+Každých 10 s se objeví nová linka z paměti. Paměť se průběžně doplňuje z Overpass API (CZ + DE, po částech).
+</div>
+<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px">
+<span class="pill" id="poolCount">0 v paměti</span>
+<span class="pill" id="offeredCount">0 v nabídce</span>
+<span class="pill" id="ownedCount">0 koupeno</span>
+</div>
+<div id="offers"></div>
+</aside>
+<div id="finance">💰 Peníze: <span id="money">10000</span> Kč</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+const map = L.map('map',{worldCopyJump:true}).setView([48.9,13.4],8);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
+document.getElementById('hamburger').onclick = ()=>document.getElementById('menu').classList.toggle('open');
+
+let money=10000;
+const moneyEl=document.getElementById('money');
+const offersEl=document.getElementById('offers');
+const poolCountEl=document.getElementById('poolCount');
+const offeredCountEl=document.getElementById('offeredCount');
+const ownedCountEl=document.getElementById('ownedCount');
+
+const BUS_ICON=L.icon({iconUrl:"https://cdn-icons-png.flaticon.com/512/61/61212.png", iconSize:[24,24]});
+
+const ROUTE_POOL=[];
+const OFFERING=new Set();
+const OWNED=new Set();
+const SEEN=new Set();
+let ownedCount=0;
+
+function updateBadges(){
+  poolCountEl.textContent=`${ROUTE_POOL.length} v paměti`;
+  offeredCountEl.textContent=`${OFFERING.size} v nabídce`;
+  ownedCountEl.textContent=`${ownedCount} koupeno`;
+}
+function setMoney(v){money=v;moneyEl.textContent=money;}
+
+function distanceKm(a,b){return L.latLng(a).distanceTo(L.latLng(b))/1000;}
+function polylineKm(coords){let d=0;for(let i=1;i<coords.length;i++)d+=distanceKm(coords[i-1],coords[i]);return d;}
+
+function extractStopsOrdered(rel,nodesById){
+  const isStopRole=r=>r==='stop'||r==='stop_entry_only'||r==='stop_exit_only';
+  const isPlatRole=r=>r==='platform'||r==='platform_entry_only'||r==='platform_exit_only';
+  const orderedMembers=rel.members||[];
+  let stops=orderedMembers.filter(m=>m.type==='node'&&isStopRole(m.role)).map(m=>nodesById[m.ref]).filter(Boolean);
+  if(stops.length<2){
+    stops=orderedMembers.filter(m=>m.type==='node'&&isPlatRole(m.role)).map(m=>nodesById[m.ref]).filter(Boolean);
+  }
+  if(stops.length<2) return [];
+  return stops.map(s=>[s.lat,s.lon]);
+}
+
+function runBusPendulum(marker, coords, speedKmh=70, totalKm){
+  const speed = (speedKmh*1000)/3600;
+  const seg = [];
+  for(let i=0;i<coords.length-1;i++){
+    const a=L.latLng(coords[i]), b=L.latLng(coords[i+1]);
+    const d=a.distanceTo(b);
+    if(d>0) seg.push({a,b,d});
+  }
+  if(seg.length===0) return;
+  let idx=0, dist=0, dir=1;
+
+  setInterval(()=>{
+    let step = speed*(50/1000); // tick 50ms
+    dist+=step;
+    while(dist>seg[idx].d && seg[idx].d>0){
+      dist-=seg[idx].d;
+      // při projetí segmentu přičti peníze
+      const earn = seg[idx].d/1000 * 12; // 12 Kč/km
+      setMoney(money+Math.round(earn));
+
+      idx+=dir;
+      if(idx>=seg.length){dir=-1; idx=seg.length-1; dist=0;}
+      if(idx<0){dir=1; idx=0; dist=0;}
+    }
+    const s = seg[idx].d===0?0:dist/seg[idx].d;
+    const lat = seg[idx].a.lat + (seg[idx].b.lat - seg[idx].a.lat)*s;
+    const lng = seg[idx].a.lng + (seg[idx].b.lng - seg[idx].a.lng)*s;
+    marker.setLatLng([lat,lng]);
+  },50);
+}
+
+function spawnBus(line){
+  const marker = L.marker(line.coords[0], {icon: BUS_ICON}).addTo(map);
+
+  function showLine() {
+    const poly = L.polyline(line.coords, {color:'blue'}).addTo(map);
+    marker.bindPopup(`🚌 <b>${line.name}</b><br><small>ID ${line.id}</small>`).openPopup();
+
+    marker.on('popupclose', ()=>{
+      try { map.removeLayer(poly); } catch(_) {}
+    });
+  }
+
+  marker.on('click', showLine);
+
+  runBusPendulum(marker, line.coords, 70, line.km);
+}
+
+// Randomizace nabídky
+function offerOneFromPool(){
+  const available=ROUTE_POOL.filter(l=>!OFFERING.has(l.id)&&!OWNED.has(l.id));
+  if(available.length===0){updateBadges();return;}
+  const idx=Math.floor(Math.random()*available.length);
+  const line=available[idx];
+
+  OFFERING.add(line.id);updateBadges();
+
+  const card=document.createElement('div');card.className='offer';card.id=`offer-${line.id}`;
+  card.innerHTML=`
+    <b>${line.name}</b><br/>
+    <span class="muted">ID ${line.id}</span><br/>
+    <span class="muted">Délka: ${line.km.toFixed(1)} km</span><br/>
+    <span class="muted">Cena: ${line.price} Kč</span><br/>
+    <button class="btn">Koupit</button>`;
+  const btn=card.querySelector('button');
+  btn.onclick=()=>{
+    if(OWNED.has(line.id)) return;
+    if(money<line.price){alert('Nemáš dost peněz!');return;}
+    setMoney(money-line.price);
+    OWNED.add(line.id);OFFERING.delete(line.id);
+    ownedCount++;updateBadges();
+    card.remove();
+    const ridx=ROUTE_POOL.findIndex(r=>r.id===line.id);if(ridx>=0)ROUTE_POOL.splice(ridx,1);updateBadges();
+    spawnBus(line);
+  };
+  offersEl.appendChild(card);
+}
+// ...předchozí kód zůstává stejný...
+
+setInterval(offerOneFromPool, 10000); // každých 10 s pro test
+
+/* =============== OVERPASS =============== */
+async function overpassJSON(query){
+  const res=await fetch('https://overpass-api.de/api/interpreter',{method:'POST',body:query});
+  if(!res.ok) throw new Error(`Overpass ${res.status}`);
+  return res.json();
+}
+
+function ingestOverpass(data){
+  const nodesById={};
+  for(const el of data.elements||[]) if(el.type==='node') nodesById[el.id]=el;
+
+  const rels=(data.elements||[]).filter(el=>el.type==='relation');
+  for(const rel of rels){
+    if(SEEN.has(rel.id)||OWNED.has(rel.id)) continue;
+    const coords=extractStopsOrdered(rel,nodesById);
+    if(coords.length<2) continue;
+    const km=polylineKm(coords);
+    const price=Math.max(1,Math.round(km*10));
+    const name=(rel.tags&&rel.tags.name)?rel.tags.name:`Linka ${rel.id}`;
+    ROUTE_POOL.push({id:rel.id,name,coords,km,price});
+    SEEN.add(rel.id);
+  }
+  shufflePool();
+  updateBadges();
+}
+
+// shuffle paměti
+function shufflePool(){
+  for(let i=ROUTE_POOL.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [ROUTE_POOL[i],ROUTE_POOL[j]]=[ROUTE_POOL[j],ROUTE_POOL[i]];
+  }
+}
+
+// malé bboxy pro postupné načítání
+const BBOXES = [
+  // Jihočeský kraj
+  [48.35,12.70,49.30,13.90],
+  [48.60,13.40,48.95,14.50],
+  [48.80,12.90,49.30,13.40],
+  [48.50,13.60,48.90,14.10],
+  [49.00,11.00,49.60,12.20],
+  [49.00,12.20,49.60,13.40],
+  [49.00,13.40,49.60,14.60],
+  [49.60,11.00,50.20,12.20],
+  [49.60,12.20,50.20,13.40],
+  [49.60,13.40,50.20,14.80],
+
+  // Středočeský kraj (jižní část)
+  [49.50,14.20,50.10,15.00],
+  [49.20,14.50,49.70,15.30],
+
+  // Mnichov a okolí
+  [47.90,11.00,48.50,11.90],
+  [48.10,11.50,48.60,12.10],
+
+  // Německo – jih + Bavorský les
+  [48.50,12.50,49.10,13.30],
+  [48.90,12.90,49.50,13.50],
+
+  // Rakousko – Salzburg, okolí
+  [47.50,12.80,47.90,13.30],
+  [47.70,13.00,48.10,13.50],
+
+  // Rakousko – Innsbruck + Tyrolsko
+  [47.20,11.20,47.60,11.80],
+  [46.80,10.90,47.30,11.50],
+
+  // Jižní Tyrolsko / Bolzano
+  [46.20,10.30,46.70,11.20],
+  [46.40,11.10,46.80,11.60]
+];
+let bboxIdx=0;
+
+async function loadNextBbox(){
+  if(bboxIdx>=BBOXES.length) bboxIdx=0;
+  const b=BBOXES[bboxIdx++];
+  const query=`
+    [out:json][timeout:60];
+    (
+      relation["route"="bus"](${b[0]},${b[1]},${b[2]},${b[3]});
+    );
+    out body;
+    >;
+    out skel qt;
+  `;
+  try{
+    const json=await overpassJSON(query);
+    ingestOverpass(json);
+  }catch(e){console.warn('Overpass batch failed',e);}
+}
+
+// bootstrap
+(async function(){
+  await loadNextBbox();
+  await loadNextBbox();
+  await loadNextBbox();
+  setInterval(loadNextBbox,30000);
+})();
+setTimeout(offerOneFromPool,3000);
+
+</script>
+</body>
+</html>
