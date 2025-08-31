@@ -85,7 +85,7 @@
   <script>
     // ------------------ CONFIG ------------------
     const TERMINAL = {lat:49.1089704, lng:13.8666451};
-    let fetchRadiusKm = 10;
+    let fetchRadiusKm = 5;
     const KILOMETRE_PRICE = 315;
     const TRUCK_SPEED_KMH = 670;
     const FIRST_TRUCK_FREE = true;
@@ -281,7 +281,7 @@ out center;`;
     function randFrom(arr){return arr[Math.floor(Math.random()*arr.length)];}
 
     // ----------- containers ----------
-    let spawnInterval = 30000;
+    let spawnInterval = 20000;
     let spawnTimer = null;
     function spawnContainer(){
       const cargo = {...randFrom(cargoTypes), id:Date.now()+Math.random()};
