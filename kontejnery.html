@@ -88,7 +88,7 @@
     let fetchRadiusKm = 10;
     const KILOMETRE_PRICE = 284;
     const TRUCK_SPEED_KMH = 650;
-    
+    const FIRST_TRUCK_FREE = true;
     const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
     // --------------------------------------------
 
@@ -101,8 +101,7 @@
     let money = 0;
     let deliveredCount = 0;
     let nextExpansionThreshold = 10;
-    let TRUCK_PRICE_BASE = 20000;     // cena druhého kamionu
-let TRUCK_PRICE_STEP = 20000;     // o kolik se zvyšuje cena dalšího
+       
 let TRUCK_PRICE = 0;              
     const cargoTypes = [
   // --- Unie (27 států) ---
@@ -396,7 +395,7 @@ out center;`;
     // ---------- trucks ----------
     let TRUCK_PRICE_BASE = 20000;     // cena druhého kamionu
 let TRUCK_PRICE_STEP = 20000;     // o kolik se zvyšuje cena dalšího
-)
+
 
 function createTruck(isFree=false){
   const truck = {
