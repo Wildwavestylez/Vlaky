@@ -355,16 +355,46 @@ out center;`;
     }
 
     // ---------- trucks ----------
-    function createTruck(isFree=false){
-      const truck = {id:Date.now()+Math.random(), lat:TERMINAL.lat, lng:TERMINAL.lng, status:'idle', marker:null};
-      truck.marker = L.circleMarker([truck.lat, truck.lng], {radius:6, color:'#000', fillColor:'#f39c12', fillOpacity:1}).addTo(map).bindTooltip('Kamion');
-      trucks.push(truck); return truck;
-    }
-    if(FIRST_TRUCK_FREE) createTruck(true);
-    document.getElementById('buyTruckBtn').addEventListener('click', ()=>{
-      if(money < TRUCK_PRICE){ alert('Nemáš dost peněz'); return; }
-      money -= TRUCK_PRICE; updateUI(); createTruck(false); alert('Koupil jsi nový kamion');
-    });
+    let TRUCK_PRICE_BASE = 20000;     // cena druhého kamionu
+let TRUCK_PRICE_STEP = 20000;     // o kolik se zvyšuje cena dalšího
+let TRUCK_PRICE = 0;              // první kamion zdarma (jen inicializační hodnota)
+
+function createTruck(isFree=false){
+  const truck = {
+    id: Date.now()+Math.random(),
+    lat: TERMINAL.lat,
+    lng: TERMINAL.lng,
+    status: 'idle',
+    marker: null
+  };
+  truck.marker = L.circleMarker([truck.lat, truck.lng], {
+    radius: 6,
+    color: '#000',
+    fillColor: '#f39c12',
+    fillOpacity: 1
+  }).addTo(map).bindTooltip('Kamion');
+  trucks.push(truck);
+  return truck;
+}
+
+// první kamion zdarma
+if(FIRST_TRUCK_FREE) createTruck(true);
+
+// tlačítko pro nákup
+document.getElementById('buyTruckBtn').addEventListener('click', ()=>{
+  // cena se určí podle počtu kamionů (první zdarma, druhý 20k, třetí 40k, …)
+  const trucksOwned = trucks.length;
+  TRUCK_PRICE = trucksOwned === 0 ? 0 : TRUCK_PRICE_BASE + TRUCK_PRICE_STEP * (trucksOwned - 1);
+
+  if(money < TRUCK_PRICE){
+    alert('Nemáš dost peněz');
+    return;
+  }
+  money -= TRUCK_PRICE;
+  updateUI();
+  createTruck(false);
+  alert(`Koupil jsi nový kamion za ${TRUCK_PRICE} Kč`);
+});
     function findIdleTruck(){ return trucks.find(t=>t.status==='idle'); }
 
     async function assignToTruck(warehouseIndex){
