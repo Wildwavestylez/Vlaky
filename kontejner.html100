@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
+  <title>Kontejnerový terminál — prototyp</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+  <style>
+    :root{--panel-height:42%;--accent:#1f7ae0}
+    html,body,#map{height:100%;margin:0;padding:0}
+    body{font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:#efefef}
+    #map{position:fixed;left:0;right:0;top:0;bottom:0}
+    .hamburger{position:fixed;left:12px;top:12px;z-index:1002;background:rgba(255,255,255,0.95);border-radius:10px;padding:8px;box-shadow:0 2px 8px rgba(0,0,0,0.2);}
+    .hamburger button{border:0;background:none;font-size:20px;padding:6px}
+    .panel{position:fixed;left:6px;right:6px;bottom:6px;height:var(--panel-height);background:rgba(255,255,255,0.98);border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,0.25);overflow:auto;z-index:1001;transform:translateY(100%);transition:transform .28s ease}
+    .panel.open{transform:translateY(0%)}
+    .panel .header{display:flex;align-items:center;justify-content:space-between;padding:10px;border-bottom:1px solid #eee}
+    .panel .content{padding:10px}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    .card{background:#fafafa;padding:8px;border-radius:8px;border:1px solid #eee}
+    .container-item{padding:8px;margin:6px 0;border-radius:6px;background:#fff;border:1px solid #ddd;display:flex;justify-content:space-between;align-items:center}
+    .btn{padding:8px 12px;border-radius:8px;border:0;cursor:pointer}
+    .btn.primary{background:var(--accent);color:#fff}
+    .btn.positive{background:#2ecc71;color:#fff}
+    .btn.warn{background:#f39c12;color:#fff}
+    .btn.danger{background:#e74c3c;color:#fff}
+    @media(min-width:900px){:root{--panel-height:360px}.panel{left:12px;right:auto;width:360px;bottom:12px;border-radius:14px}}
+    .status-line{font-size:13px;color:#555}
+    .small-muted{font-size:12px;color:#777}
+    .legend{position:fixed;right:12px;top:12px;z-index:1002;background:rgba(255,255,255,0.95);padding:8px;border-radius:8px;border:1px solid #eee}
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="hamburger"><button id="hambBtn" aria-label="Menu">☰</button></div>
+  <div class="legend">
+    <div style="font-weight:600;margin-bottom:6px">Terminál</div>
+    <div class="small-muted">Rychlost kamionu: 70 km/h<br>150 Kč / km · 1. kamion zdarma · další 100 000 Kč</div>
+  </div>
+  <div id="panel" class="panel" aria-hidden="true">
+    <div class="header">
+      <div style="font-weight:700">Kontejnerový terminál</div>
+      <div><button id="closePanel" class="btn">✕</button></div>
+    </div>
+    <div class="content">
+      <div class="row">
+        <div class="card" style="flex:1 1 200px">
+          <div style="font-weight:600">Finance</div>
+          <div id="moneyDisplay" style="font-size:18px;margin-top:6px">Kč 0</div>
+          <div class="small-muted" id="deliveredCount">Odvezeno: 0</div>
+          <div style="margin-top:8px">
+            <button id="buyTruckBtn" class="btn primary">Koupit kamion (100 000 Kč)</button>
+          </div>
+        </div>
+        <div class="card" style="flex:1 1 200px">
+          <div style="font-weight:600">Terminál</div>
+          <div class="small-muted">Pozice: 49.1089704, 13.8666451</div>
+          <div style="margin-top:8px">
+            <button id="spawnTrainBtn" class="btn">Spustit vlak (test)</button>
+            <button id="expandBtn" class="btn" style="margin-left:6px">Rozšířit +5 km</button>
+          </div>
+          <div style="margin-top:6px" class="small-muted">Aktuální okruh: <span id="radiusDisplay">10</span> km</div>
+        </div>
+      </div>
+      <hr />
+      <div>
+        <div style="font-weight:700">Příchozí vlak</div>
+        <div id="trainList"></div>
+      </div>
+      <hr />
+      <div>
+        <div style="font-weight:700">Mezisklad</div>
+        <div id="warehouseList"></div>
+      </div>
+      <hr />
+      <div>
+        <div style="font-weight:700">Nastavení (pro dev/test)</div>
+        <div class="small-muted">Interval příchodu kontejneru (ms)</div>
+        <input id="spawnIntervalInput" type="number" value="10000" style="width:120px;margin-top:6px" />
+      </div>
+      <div style="height:40px"></div>
+    </div>
+  </div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script>
+    // ------------------ CONFIG ------------------
+    const TERMINAL = {lat:49.1089704, lng:13.8666451};
+    let fetchRadiusKm = 10;
+    const KILOMETRE_PRICE = 250;
+    const TRUCK_SPEED_KMH = 650;
+    const FIRST_TRUCK_FREE = true;
+    const TRUCK_PRICE = 50000;
+    const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
+    // --------------------------------------------
+
+    // state
+    let map, terminalMarker;
+    let towns = [];
+    let trainQueue = [];
+    let warehouse = [];
+    let trucks = [];
+    let money = 0;
+    let deliveredCount = 0;
+    let nextExpansionThreshold = 50;
+
+    const cargoTypes = [
+      {name:'Levné oblečení (Temu)', origin:'Čína', value:'malá', eu:false},
+      {name:'Elektronika', origin:'Japonsko', value:'velká', eu:false},
+      {name:'Auta', origin:'USA', value:'velká', eu:false},
+      {name:'Motorky', origin:'USA', value:'velká', eu:false},
+      {name:'Káva', origin:'Brazílie', value:'velká', eu:false},
+      {name:'Náhradní díly', origin:'Německo (EU)', value:'malá', eu:true},
+      {name:'Banány', origin:'Ekvádor', value:'velká', eu:false},
+      {name:'Hračky', origin:'Čína', value:'malá', eu:false},
+      {name:'Textil', origin:'Turecko', value:'malá', eu:false},
+      {name:'Stroje', origin:'USA', value:'velká', eu:false}
+    ];
+
+    function initMap(){
+      map = L.map('map').setView([TERMINAL.lat, TERMINAL.lng], 12);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        {attribution:'© OSM'}).addTo(map);
+      terminalMarker = L.circleMarker([TERMINAL.lat, TERMINAL.lng],
+        {radius:8, color:'#2c3e50', fillColor:'#1f7ae0', fillOpacity:1}
+      ).addTo(map).bindTooltip('Terminál');
+    }
+    initMap();
+
+    // ----------- Overpass fetch ----------
+    async function fetchTowns(radiusKm){
+      towns = [];
+      const radiusM = Math.round(radiusKm * 1000);
+      const q = `
+[out:json][timeout:25];
+(
+  node["place"~"town|village"](around:${radiusM},${TERMINAL.lat},${TERMINAL.lng});
+  way["place"~"town|village"](around:${radiusM},${TERMINAL.lat},${TERMINAL.lng});
+);
+out center;`;
+      try{
+        const resp = await fetch(OVERPASS_ENDPOINT, {method:'POST',body:q});
+        const data = await resp.json();
+        data.elements.forEach(el=>{
+          let lat = el.lat || (el.center && el.center.lat);
+          let lon = el.lon || (el.center && el.center.lon);
+          let name = el.tags && (el.tags.name || el.tags['name:cs'] || el.tags['name:en']);
+          if(name && lat && lon){ towns.push({name, lat, lng:lon}); }
+        });
+        const unique = {};
+        towns = towns.filter(t=>{if(unique[t.name]) return false; unique[t.name]=true; return true;});
+      }catch(err){ console.error(err); }
+    }
+    fetchTowns(fetchRadiusKm);
+
+    // ----------- helpers ----------
+    function haversineKm(a,b){
+      const R = 6371; const toRad = x=>x*Math.PI/180;
+      const dLat = toRad(b.lat-a.lat); const dLon = toRad(b.lng-a.lng);
+      const lat1 = toRad(a.lat), lat2 = toRad(b.lat);
+      const hav = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
+      return R*2*Math.atan2(Math.sqrt(hav), Math.sqrt(1-hav));
+    }
+    function randFrom(arr){return arr[Math.floor(Math.random()*arr.length)];}
+
+    // ----------- containers ----------
+    let spawnInterval = 30000;
+    let spawnTimer = null;
+    function spawnContainer(){
+      const cargo = {...randFrom(cargoTypes), id:Date.now()+Math.random()};
+      trainQueue.push(cargo); renderTrainList();
+    }
+    function startSpawning(){
+      if(spawnTimer) clearInterval(spawnTimer);
+      spawnTimer = setInterval(spawnContainer, spawnInterval);
+      spawnContainer();
+    }
+    document.getElementById('spawnIntervalInput').addEventListener('change', e=>{
+      spawnInterval = Number(e.target.value) || 10000; startSpawning();
+    });
+    document.getElementById('spawnTrainBtn').addEventListener('click', ()=>spawnContainer());
+
+    function renderTrainList(){
+      const el = document.getElementById('trainList');
+      el.innerHTML='';
+      trainQueue.forEach(c=>{
+        const div = document.createElement('div');
+        div.className='container-item';
+        div.innerHTML = `<div><strong>${c.name}</strong><div class="small-muted">${c.origin} · hodn: ${c.value}</div></div>
+                         <div><button class="btn" onclick='openPapers("${c.id}")'>Papíry</button></div>`;
+        el.appendChild(div);
+      });
+    }
+
+    // ---------- papers modal ----------
+    let currentContainer = null;
+    function openPapers(id){
+      const cont = trainQueue.find(x=>String(x.id)===String(id));
+      if(!cont) return;
+      currentContainer = cont;
+      const html = `
+        <div style="position:fixed;left:10px;right:10px;top:50%;transform:translateY(-50%);z-index:2000;background:#fff;padding:12px;border-radius:12px;box-shadow:0 8px 20px rgba(0,0,0,0.3)" id="paperModal">
+          <div style="font-weight:700;margin-bottom:6px">Papíry — ${cont.name}</div>
+          <div class="small-muted">Původ: ${cont.origin} · Hodnota: ${cont.value}</div>
+          <div style="margin-top:8px;display:flex;gap:8px">
+            <button id="btnNo" class="btn">Nevyclít</button>
+            <button id="btnSelf" class="btn positive">Vyclít sám</button>
+            <button id="btnOffice" class="btn warn">Poslat na úřad</button>
+            <button id="btnCloseModal" class="btn">Zavřít</button>
+          </div>
+        </div>`;
+      const wrapper = document.createElement('div'); wrapper.innerHTML = html; document.body.appendChild(wrapper);
+      document.getElementById('btnCloseModal').onclick = ()=>{document.getElementById('paperModal').remove(); currentContainer=null};
+      document.getElementById('btnNo').onclick = ()=>{processContainer('nevyclit')};
+      document.getElementById('btnSelf').onclick = ()=>{processContainer('sam')};
+      document.getElementById('btnOffice').onclick = ()=>{processContainer('urad')};
+    }
+
+    function assignDestination(container){
+      if (towns.length === 0) return container;
+      const town = randFrom(towns);
+      const dist = haversineKm(TERMINAL, town);
+      container.destination = town.name;
+      container.dist = dist.toFixed(1);
+      container.reward = Math.round(dist * KILOMETRE_PRICE);
+      return container;
+    }
+
+    function processContainer(method){
+      if(!currentContainer) return;
+      const cont = currentContainer;
+      const modal = document.getElementById('paperModal'); if(modal) modal.remove();
+      if(method==='nevyclit'){
+        if(cont.eu){ moveToWarehouse(cont); alert('Nevycleno — přijato do skladu'); }
+        else{ alert('Toto nelze nevyclít (není EU)'); }
+      }else if(method==='sam'){
+        if(cont.value==='malá'){ moveToWarehouse(cont); alert('Vycleno vlastní cestou — do skladu'); }
+        else{ sendToOffice(cont); alert('Velká hodnota — posílám na úřad'); }
+      }else if(method==='urad'){ sendToOffice(cont); alert('Odesláno na úřad...'); }
+      trainQueue = trainQueue.filter(t=>t.id!==cont.id); renderTrainList();
+    }
+
+    function moveToWarehouse(container){
+      assignDestination(container);
+      warehouse.push(container);
+      renderWarehouse();
+    }
+    function sendToOffice(container){
+  const delay = 50000 + Math.random()*12000;
+  setTimeout(()=>{
+    assignDestination(container);
+    moveToWarehouse(container);
+    renderTrainList();
+    renderWarehouse();
+    // alert(container.name + ' — vycleno úřadem');  // zbytečné
+  }, delay);
+}
+
+    function renderWarehouse(){
+      const el = document.getElementById('warehouseList');
+      if(!el) return;
+      el.innerHTML = '';
+      warehouse.forEach((c, idx)=>{
+        const div = document.createElement('div');
+        div.className = 'container-item';
+        div.innerHTML = `
+          <div>
+            <strong>${c.name}</strong>
+            <div class="small-muted">${c.origin} · ${c.eu ? 'EU' : 'mimo EU'} · hodn: ${c.value}</div>
+            <div class="small-muted">Destinace: ${c.destination}<br>${c.dist} km · ${c.reward} Kč</div>
+          </div>
+          <div><button class="btn primary" onclick="assignToTruck(${idx})">Naložit</button></div>
+        `;
+        el.appendChild(div);
+      });
+    }
+
+    // ---------- trucks ----------
+    function createTruck(isFree=false){
+      const truck = {id:Date.now()+Math.random(), lat:TERMINAL.lat, lng:TERMINAL.lng, status:'idle', marker:null};
+      truck.marker = L.circleMarker([truck.lat, truck.lng], {radius:6, color:'#000', fillColor:'#f39c12', fillOpacity:1}).addTo(map).bindTooltip('Kamion');
+      trucks.push(truck); return truck;
+    }
+    if(FIRST_TRUCK_FREE) createTruck(true);
+    document.getElementById('buyTruckBtn').addEventListener('click', ()=>{
+      if(money < TRUCK_PRICE){ alert('Nemáš dost peněz'); return; }
+      money -= TRUCK_PRICE; updateUI(); createTruck(false); alert('Koupil jsi nový kamion');
+    });
+    function findIdleTruck(){ return trucks.find(t=>t.status==='idle'); }
+
+    async function assignToTruck(warehouseIndex){
+      const cont = warehouse[warehouseIndex]; if(!cont) return;
+      const truck = findIdleTruck(); if(!truck){ alert('Žádný volný kamion'); return; }
+      const destTown = towns.find(t=>t.name===cont.destination);
+      if(!destTown){ alert('Destinace nenalezena'); return; }
+      const distKm = parseFloat(cont.dist);
+      // move truck
+      // ihned odeber kontejner z meziskladu (po naložení)
+      warehouse.splice(warehouseIndex, 1);
+      renderWarehouse();
+      updateUI();
+
+      // move truck
+      truck.status = 'busy';
+      updateTruckMarker(truck);
+
+      driveTruck(truck, {lat: destTown.lat, lng: destTown.lng}, distKm, () => {
+        // arrived at destination
+        money += cont.reward;
+        deliveredCount += 1;
+        updateUI();
+        alert(`Doručeno do ${cont.destination} — získáno Kč ${cont.reward} (vzdálenost ${distKm.toFixed(1)} km)`);
+
+        // check expansion threshold
+        if (deliveredCount >= nextExpansionThreshold) {
+          fetchRadiusKm += 5;
+          document.getElementById('radiusDisplay').innerText = fetchRadiusKm;
+          fetchTowns(fetchRadiusKm);
+          nextExpansionThreshold += 10;
+          alert('Okruh rozšířen o 5 km — nové obce načteny');
+        }
+
+        // return to terminal (use same distance for estimated time)
+        driveTruck(truck, {lat: TERMINAL.lat, lng: TERMINAL.lng}, distKm, () => {
+          truck.status = 'idle';
+          truck.lat = TERMINAL.lat;
+          truck.lng = TERMINAL.lng;
+          updateTruckMarker(truck);
+        });
+      });
+    }
+
+    // update marker position & tooltip
+    function updateTruckMarker(truck){
+      if(!truck.marker) return;
+      truck.marker.setLatLng([truck.lat, truck.lng]);
+      truck.marker.bindTooltip(truck.status, {permanent:false});
+    }
+
+    // simple straight-line drive animation using requestAnimationFrame
+    function driveTruck(truck, destLatLng, distKm, onArrive){
+      const start = {lat: truck.lat, lng: truck.lng};
+      const totalKm = distKm;
+      // compute travel time based on truck speed
+      const hours = Math.max(0.001, totalKm / TRUCK_SPEED_KMH);
+      const durationMs = Math.max(500, hours * 3600 * 1000); // at least 500ms for short trips
+      const t0 = performance.now();
+
+      function step(now){
+        const p = Math.min(1, (now - t0) / durationMs);
+        const lat = start.lat + (destLatLng.lat - start.lat) * p;
+        const lng = start.lng + (destLatLng.lng - start.lng) * p;
+        truck.lat = lat;
+        truck.lng = lng;
+        updateTruckMarker(truck);
+        if (p < 1) {
+          requestAnimationFrame(step);
+        } else {
+          onArrive && onArrive();
+        }
+      }
+      requestAnimationFrame(step);
+    }
+
+    // UI updates
+    function updateUI(){
+      document.getElementById('moneyDisplay').innerText = `Kč ${money.toLocaleString('cs-CZ')}`;
+      document.getElementById('deliveredCount').innerText = `Odvezeno: ${deliveredCount}`;
+      document.getElementById('radiusDisplay').innerText = fetchRadiusKm;
+    }
+
+    // panel toggles
+    const panel = document.getElementById('panel');
+    document.getElementById('hambBtn').addEventListener('click', ()=>{
+      panel.classList.toggle('open');
+      panel.setAttribute('aria-hidden', String(!panel.classList.contains('open')));
+    });
+    document.getElementById('closePanel').addEventListener('click', ()=>{
+      panel.classList.remove('open');
+      panel.setAttribute('aria-hidden', 'true');
+    });
+
+    // manual expand
+    document.getElementById('expandBtn').addEventListener('click', ()=>{
+      fetchRadiusKm += 5;
+      document.getElementById('radiusDisplay').innerText = fetchRadiusKm;
+      fetchTowns(fetchRadiusKm);
+      alert('Okruh ručně rozšířen +5 km');
+    });
+
+    // expose functions for inline onclicks
+    window.assignToTruck = assignToTruck;
+    window.openPapers = openPapers;
+
+    // start processes
+    startSpawning();
+    updateUI();
+
+  </script>
+</body>
+</html>
