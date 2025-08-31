@@ -435,48 +435,59 @@ document.getElementById('buyTruckBtn').addEventListener('click', ()=>{
 });
     function findIdleTruck(){ return trucks.find(t=>t.status==='idle'); }
 
-    async function assignToTruck(warehouseIndex){
-      const cont = warehouse[warehouseIndex]; if(!cont) return;
-      const truck = findIdleTruck(); if(!truck){ alert('Žádný volný kamion'); return; }
-      const destTown = towns.find(t=>t.name===cont.destination);
-      if(!destTown){ alert('Destinace nenalezena'); return; }
-      const distKm = parseFloat(cont.dist);
-      // move truck
-      // ihned odeber kontejner z meziskladu (po naložení)
-      warehouse.splice(warehouseIndex, 1);
-      renderWarehouse();
-      updateUI();
+    async function assignToTruck(warehouseIndex){  
+  const cont = warehouse[warehouseIndex];  
+  if(!cont) return;  
 
-      // move truck
-      truck.status = 'busy';
-      updateTruckMarker(truck);
+  const truck = findIdleTruck();  
+  if(!truck){ 
+    alert('Žádný volný kamion'); 
+    return;  
+  }  
 
-      driveTruck(truck, {lat: destTown.lat, lng: destTown.lng}, distKm, () => {
-        // arrived at destination
-        money += cont.reward;
-        deliveredCount += 1;
-        updateUI();
-        alert(`Doručeno do ${cont.destination} — získáno Kč ${cont.reward} (vzdálenost ${distKm.toFixed(1)} km)`);
+  const destTown = towns.find(t=>t.name===cont.destination);  
 
-        // check expansion threshold
-        if (deliveredCount >= nextExpansionThreshold) {
-          fetchRadiusKm += 5;
-          document.getElementById('radiusDisplay').innerText = fetchRadiusKm;
-          fetchTowns(fetchRadiusKm);
-          nextExpansionThreshold += 10;
-          alert('Okruh rozšířen o 5 km — nové obce načteny');
-        }
+  // ihned odeber kontejner z meziskladu (po naložení), i když destinace neplatná
+  warehouse.splice(warehouseIndex, 1);  
+  renderWarehouse();  
+  updateUI();  
 
-        // return to terminal (use same distance for estimated time)
-        driveTruck(truck, {lat: TERMINAL.lat, lng: TERMINAL.lng}, distKm, () => {
-          truck.status = 'idle';
-          truck.lat = TERMINAL.lat;
-          truck.lng = TERMINAL.lng;
-          updateTruckMarker(truck);
-        });
-      });
-    }
+  if(!destTown){ 
+    alert('Destinace nenalezena – kontejner odstraněn'); 
+    return;  
+  }  
 
+  const distKm = parseFloat(cont.dist);  
+
+  // move truck
+  truck.status = 'busy';  
+  updateTruckMarker(truck);  
+
+  driveTruck(truck, {lat: destTown.lat, lng: destTown.lng}, distKm, () => {  
+    // arrived at destination  
+    money += cont.reward;  
+    deliveredCount += 1;  
+    updateUI();  
+    alert(`Doručeno do ${cont.destination} — získáno Kč ${cont.reward} (vzdálenost ${distKm.toFixed(1)} km)`);  
+
+    // check expansion threshold  
+    if (deliveredCount >= nextExpansionThreshold) {  
+      fetchRadiusKm += 5;  
+      document.getElementById('radiusDisplay').innerText = fetchRadiusKm;  
+      fetchTowns(fetchRadiusKm);  
+      nextExpansionThreshold += 10;  
+      alert('Okruh rozšířen o 5 km — nové obce načteny');  
+    }  
+
+    // return to terminal  
+    driveTruck(truck, {lat: TERMINAL.lat, lng: TERMINAL.lng}, distKm, () => {  
+      truck.status = 'idle';  
+      truck.lat = TERMINAL.lat;  
+      truck.lng = TERMINAL.lng;  
+      updateTruckMarker(truck);  
+    });  
+  });  
+}
     // update marker position & tooltip
     function updateTruckMarker(truck){
       if(!truck.marker) return;
