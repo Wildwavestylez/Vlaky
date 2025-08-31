@@ -100,7 +100,7 @@
     let trucks = [];
     let money = 0;
     let deliveredCount = 0;
-    let nextExpansionThreshold = 30;
+    let nextExpansionThreshold = 10;
        
 let TRUCK_PRICE = 0;              
     const cargoTypes = [
@@ -636,7 +636,7 @@ document.getElementById('buyTruckBtn').addEventListener('click', ()=>{
       fetchRadiusKm += 5;  
       document.getElementById('radiusDisplay').innerText = fetchRadiusKm;  
       fetchTowns(fetchRadiusKm);  
-      nextExpansionThreshold += 30;  
+      nextExpansionThreshold += 10;  
       alert('Okruh rozšířen o 5 km — nové obce načteny');  
     }  
 
