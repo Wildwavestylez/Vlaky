@@ -711,9 +711,61 @@ document.getElementById('buyTruckBtn').addEventListener('click', ()=>{
     window.assignToTruck = assignToTruck;
     window.openPapers = openPapers;
 
+function saveGame() {
+  const state = {
+    money,
+    deliveredCount,
+    fetchRadiusKm,
+    nextExpansionThreshold,
+    truckCount: trucks.length,   // jen počet, ne pole
+    warehouse,
+    trainQueue
+  };
+  localStorage.setItem('terminalSave', JSON.stringify(state));
+  alert('Hra byla uložena');
+}
+
+function loadGame() {
+  const raw = localStorage.getItem('terminalSave');
+  if (!raw) return;
+  try {
+    const state = JSON.parse(raw);
+    money = state.money || 0;
+    deliveredCount = state.deliveredCount || 0;
+    fetchRadiusKm = state.fetchRadiusKm || 5;
+    nextExpansionThreshold = state.nextExpansionThreshold || 10;
+
+// obnovit kamiony – podle uloženého počtu
+trucks.forEach(t => { if (t.marker) map.removeLayer(t.marker); });
+trucks = [];
+for (let i = 0; i < (state.truckCount || 0); i++) {
+  const t = createTruck();
+  t.lat = TERMINAL.lat;
+  t.lng = TERMINAL.lng;
+  t.status = 'idle';
+  updateTruckMarker(t);
+}
+    warehouse = state.warehouse || [];
+    trainQueue = state.trainQueue || [];
+
+    renderWarehouse();
+    renderTrainList();
+    updateUI();
+    fetchTowns(fetchRadiusKm);
+    alert('Hra byla načtena');
+  } catch(e) {
+    console.error(e);
+    alert('Načtení selhalo');
+  }
+}
+
+
     // start processes
     startSpawning();
     updateUI();
+    setInterval(saveGame, 300000); // autosave každou minutu
+
+
 
   </script>
 </body>
