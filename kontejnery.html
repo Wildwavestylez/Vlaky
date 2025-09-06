@@ -107,7 +107,7 @@
     let trucks = [];
     let money = 0;
     let deliveredCount = 0;
-    let nextExpansionThreshold = 10;
+    let nextExpansionThreshold = 15;
 
 let TRUCK_PRICE = 0;              
     const cargoTypes = [
@@ -488,7 +488,7 @@ out center;`;
           <div style="font-weight:700;margin-bottom:6px">Papíry — ${cont.name}</div>
           <div class="small-muted">Původ: ${cont.origin} · Hodnota: ${cont.value}</div>
           <div style="margin-top:8px;display:flex;gap:8px">
-            <button id="btnNo" class="btn">Nevyclít</button>
+            <button id="btnNo" class="btn">Neclít</button>
             <button id="btnSelf" class="btn positive">Vyclít sám</button>
             <button id="btnOffice" class="btn warn">Poslat na úřad</button>
             <button id="btnCloseModal" class="btn">Zavřít</button>
@@ -561,8 +561,8 @@ out center;`;
     }
 
     // ---------- trucks ----------
-    let TRUCK_PRICE_BASE = 2000;     // cena druhého kamionu
-let TRUCK_PRICE_STEP = 2000;     // o kolik se zvyšuje cena dalšího
+    let TRUCK_PRICE_BASE = 15000;     // cena druhého kamionu
+let TRUCK_PRICE_STEP = 5000;     // o kolik se zvyšuje cena dalšího
 
 
 function createTruck(isFree=false){
@@ -643,8 +643,8 @@ document.getElementById('buyTruckBtn').addEventListener('click', ()=>{
       fetchRadiusKm += 2;  
       document.getElementById('radiusDisplay').innerText = fetchRadiusKm;  
       fetchTowns(fetchRadiusKm);  
-      nextExpansionThreshold += 15;  
-      alert('Okruh rozšířen o 5 km — nové obce načteny');  
+      nextExpansionThreshold += 20;  
+      alert('Okruh rozšířen o 2 km — nové obce načteny');  
     }  
 
     // return to terminal  
