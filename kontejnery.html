@@ -52,6 +52,13 @@
             <button id="buyTruckBtn" class="btn primary">Koupit kamion (100 000 Kč)</button>
           </div>
         </div>
+          <div class="card" style="flex:1 1 200px">
+  <div style="font-weight:600">Uložení hry</div>
+  <div style="margin-top:8px">
+    <button class="btn" onclick="saveGame()">💾 Uložit</button>
+    <button class="btn" onclick="loadGame()">📂 Načíst</button>
+  </div>
+</div>
         <div class="card" style="flex:1 1 200px">
           <div style="font-weight:600">Terminál</div>
           <div class="small-muted">Pozice: 49.1089704, 13.8666451</div>
@@ -85,7 +92,7 @@
   <script>
     // ------------------ CONFIG ------------------
     const TERMINAL = {lat:49.1089704, lng:13.8666451};
-    let fetchRadiusKm = 5;
+    let fetchRadiusKm = 4;
     const KILOMETRE_PRICE = 315;
     const TRUCK_SPEED_KMH = 670;
     const FIRST_TRUCK_FREE = true;
@@ -101,7 +108,7 @@
     let money = 0;
     let deliveredCount = 0;
     let nextExpansionThreshold = 10;
-       
+
 let TRUCK_PRICE = 0;              
     const cargoTypes = [
   // --- Unie (27 států) ---
@@ -554,8 +561,8 @@ out center;`;
     }
 
     // ---------- trucks ----------
-    let TRUCK_PRICE_BASE = 15000;     // cena druhého kamionu
-let TRUCK_PRICE_STEP = 5000;     // o kolik se zvyšuje cena dalšího
+    let TRUCK_PRICE_BASE = 2000;     // cena druhého kamionu
+let TRUCK_PRICE_STEP = 2000;     // o kolik se zvyšuje cena dalšího
 
 
 function createTruck(isFree=false){
@@ -633,10 +640,10 @@ document.getElementById('buyTruckBtn').addEventListener('click', ()=>{
 
     // check expansion threshold  
     if (deliveredCount >= nextExpansionThreshold) {  
-      fetchRadiusKm += 5;  
+      fetchRadiusKm += 2;  
       document.getElementById('radiusDisplay').innerText = fetchRadiusKm;  
       fetchTowns(fetchRadiusKm);  
-      nextExpansionThreshold += 10;  
+      nextExpansionThreshold += 15;  
       alert('Okruh rozšířen o 5 km — nové obce načteny');  
     }  
 
@@ -711,7 +718,7 @@ document.getElementById('buyTruckBtn').addEventListener('click', ()=>{
     window.assignToTruck = assignToTruck;
     window.openPapers = openPapers;
 
-function saveGame() {
+  function saveGame() {
   const state = {
     money,
     deliveredCount,
@@ -757,15 +764,12 @@ for (let i = 0; i < (state.truckCount || 0); i++) {
     console.error(e);
     alert('Načtení selhalo');
   }
-}
-
-
+}  
+  
     // start processes
     startSpawning();
     updateUI();
     setInterval(saveGame, 300000); // autosave každou minutu
-
-
 
   </script>
 </body>
