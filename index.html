@@ -155,7 +155,7 @@ function updateBadges(){
   ownedCountEl.textContent = `${ownedInSession.size} koupeno`;
 
   // počet všech linek v IndexedDB (ignorujeme owned)
-  countStoreSafe('lines').then(c=>{
+  countStore('lines').then(c=>{
     poolCountEl.textContent = `${c} v DB`;
   }).catch(()=>{});
 }
@@ -227,8 +227,11 @@ async function getRandomOfferableLine(maxScan=600){
 }
 
 /* ===================== OVERPASS + TILING ===================== */
-const CE = { south: 36.0, north: 68.0, west: -9.5, east: 30.0 };
-function generateTiles(region=CE, km=50){
+// CZ + SK oblast, zhruba v kilometrech
+const CE = { south: 46.0, north: 53.0, west: 11.0, east: 24.0 };
+const TILES = generateTiles(CE, 30); // menší dlaždice: 30 km místo 50 km
+    function generateTiles(region=CE, km=50)
+    {
   const tiles=[];
   const dLat=km/111;
   for(let lat=region.south; lat<region.north; lat+=dLat){
@@ -241,7 +244,6 @@ function generateTiles(region=CE, km=50){
   }
   return tiles;
 }
-const TILES = generateTiles(CE,50);
 let tilesDone = new Set(); // runtime
 updateTilesBadge();
 
@@ -407,17 +409,39 @@ function runVehiclePendulum(marker, coords, speedKmh=70, ratePerKm=12){
 
 function spawnVehicle(line){
   const marker = L.marker(line.coords[0], { icon: iconForType(line.type) }).addTo(map);
+  let poly = null;
 
-  let poly;
-  marker.on('click', ()=>{
-    if(poly) map.removeLayer(poly);
-    poly = L.polyline(line.coords, { color:'blue' }).addTo(map);
-    marker.bindPopup(`🚍 <b>${line.name}</b><br><small>${line.type.toUpperCase()} • ID ${line.id}</small>`).openPopup();
-    marker.once('popupclose', ()=>{ try{ map.removeLayer(poly); poly=null; }catch(_){} });
+  // popup se vytvoří hned při inicializaci markeru
+  const popupHtml = `
+    🚍 <b>${line.name}</b><br>
+    <small>${line.type.toUpperCase()} • ID ${line.id}</small><br>
+    <small>Délka: ${line.km.toFixed(1)} km</small><br>
+    <small>Cena: ${line.price} Kč</small>
+  `;
+  marker.bindPopup(popupHtml);
+
+  // kliknutí – otevře popup a vykreslí trasu
+  marker.on('click', () => {
+    if (poly) {
+      map.removeLayer(poly);
+      poly = null;
+    }
+    poly = L.polyline(line.coords, { color: 'blue' }).addTo(map);
+    marker.openPopup();
   });
 
+  // po zavření popupu odstraníme trasu
+  marker.on('popupclose', () => {
+    if (poly) {
+      map.removeLayer(poly);
+      poly = null;
+    }
+  });
+
+  // spustíme pohyb vozidla
   runVehiclePendulum(marker, line.coords, 70, 12);
 }
+
 
 /* ===================== NABÍDKA LINEK ===================== */
 async function offerOneFromDB(){
