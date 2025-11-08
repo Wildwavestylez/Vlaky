@@ -228,9 +228,9 @@ async function getRandomOfferableLine(maxScan=600){
 
 /* ===================== OVERPASS + TILING ===================== */
 // CZ + SK oblast, zhruba v kilometrech
-const CE = { south: 46.0, north: 53.0, west: 11.0, east: 24.0 };
+const CE = { south: 47.0, north: 53.0, west: 11.5, east: 24.0 };
 const TILES = generateTiles(CE, 30); // menší dlaždice: 30 km místo 50 km
-    function generateTiles(region=CE, km=50)
+    function generateTiles(region=CE, km=30)
     {
   const tiles=[];
   const dLat=km/111;
