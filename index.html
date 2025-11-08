@@ -58,9 +58,9 @@ const map = L.map('map', { worldCopyJump:true }).setView([49.0, 13.3], 6);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OpenStreetMap' }).addTo(map);
 document.getElementById('hamburger').onclick = () => document.getElementById('menu').classList.toggle('open');
 
-const BUS_ICON = L.icon({ iconUrl:"https://cdn-icons-png.flaticon.com/512/61/61212.png", iconSize:[24,24] });
-const TRAM_ICON= L.icon({ iconUrl:"https://cdn-icons-png.flaticon.com/512/2847/2847720.png", iconSize:[24,24] });
-const TRAIN_ICON=L.icon({ iconUrl:"https://cdn-icons-png.flaticon.com/512/854/854894.png", iconSize:[24,24] });
+const BUS_ICON = L.icon({ iconUrl:"https://i.imgur.com/41OPNQH.png", iconSize:[24,24] });
+const TRAM_ICON= L.icon({ iconUrl:"https://i.imgur.com/CCblGwm.png", iconSize:[24,24] });
+const TRAIN_ICON=L.icon({ iconUrl:"https://i.imgur.com/WdWk7Cq.png", iconSize:[24,24] });
 const PLANE_ICON=L.icon({ iconUrl:"https://cdn-icons-png.flaticon.com/512/34/34627.png", iconSize:[24,24] });
 
 /* ===================== UI STATE ===================== */
@@ -205,7 +205,7 @@ async function saveTilesDone(){
 
 const OFFERING = new Set();
 
-async function getRandomOfferableLine(maxScan=infinity){
+async function getRandomOfferableLine(maxScan=9999999){
   return new Promise((resolve,reject)=>{
     const tx = db.transaction(['lines'],'readonly');
     const store = tx.objectStore('lines');
