@@ -488,6 +488,38 @@ setInterval(offerOneFromDB, 3000);
     setStatus('offline – používám pouze IndexedDB');
   }
 })();
+
+
+/* ===================== RESET / NOVÁ HRA ===================== */
+const resetBtn = document.createElement('button');
+resetBtn.textContent = '🔁 Nová hra';
+resetBtn.className = 'btn';
+resetBtn.style.marginTop = '10px';
+document.getElementById('menu').appendChild(resetBtn);
+
+resetBtn.onclick = async () => {
+  if (!confirm('Opravdu chceš začít novou hru? Všechny koupené linky budou zapomenuty.')) return;
+
+  // zavřeme nabídku a resetujeme stav
+  document.getElementById('menu').classList.remove('open');
+  setStatus('🧹 Mažu stará data...');
+
+  const tx = db.transaction(['lines','owned'], 'readwrite');
+  tx.objectStore('lines').clear();
+  tx.objectStore('owned').clear();
+
+  await new Promise(res => tx.oncomplete = res);
+  ownedInSession.clear();
+  OFFERING.clear();
+  offersEl.innerHTML = '';
+  updateBadges();
+
+  setMoney(2000);
+  setStatus('✅ Nová hra připravena – znovu se načítají linky...');
+  tilesDone.clear();
+  await saveTilesDone();
+  sequentialPrefetch(7000, 3);
+};
 </script>
 </body>
 </html>
