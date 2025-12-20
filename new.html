@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<title>Železniční Tycoon – MVP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
+<style>
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: Arial, sans-serif;
+}
+
+#map {
+  height: 100%;
+}
+    
+#hamburger {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  font-size: 28px;
+  background: white;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  z-index: 1100;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+
+#panel {
+  position: absolute;
+  top: 60px;
+  left: 10px;
+  width: 260px;
+  background: rgba(255,255,255,0.95);
+  border-radius: 10px;
+  padding: 10px;
+  z-index: 1000;
+  transition: transform 0.25s ease, opacity 0.25s ease;
+}
+
+#panel.hidden {
+  transform: translateX(-110%);
+  opacity: 0;
+}
+
+button {
+  width: 100%;
+  margin: 4px 0;
+  padding: 6px;
+  cursor: pointer;
+}
+
+.trainCard {
+  border: 1px solid #ccc;
+  padding: 5px;
+  margin: 4px 0;
+}
+</style>
+</head>
+
+<body>
+
+<div id="hamburger" onclick="toggleMenu()">☰</div>
+
+<div id="panel" class="hidden">
+  <b>💰 Peníze:</b> <span id="money"></span><br>
+  <b>👥 Cestující/min:</b> <span id="pax"></span><br><br>
+
+  <button onclick="mode='buyStation'">🚉 Koupit stanici</button>
+  <button onclick="mode='buildTrack'">🛤 Stavět trať</button>
+
+  <hr>
+  <b>🚆 Vlaky</b>
+  <div id="trains"></div>
+</div>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+/* =====================
+   ZÁKLADNÍ MAPA
+===================== */
+
+const map = L.map("map").setView([49.255, 13.916], 12);
+
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19
+}).addTo(map);
+
+const layers = {
+  stations: L.layerGroup().addTo(map),
+  tracks: L.layerGroup().addTo(map),
+  trains: L.layerGroup().addTo(map)
+};
+
+/* =====================
+   GAME STATE
+===================== */
+const stationPopup = L.popup();
+const game = {
+  money: 5_000_000,
+  stations: {},
+  tracks: [],
+  trains: {},
+  passengersPerMinute: 0
+};
+
+let mode = null;
+let selectedStation = null;
+
+/* =====================
+   IKONY
+===================== */
+
+function stationIcon(type) {
+  return L.divIcon({
+    html: `<div style="font-size:${type==='station'?26:18}px">
+      ${type==='station'?'🚉':'🚏'}
+    </div>`,
+    className: ""
+  });
+}
+
+/* =====================
+   DEFINICE VLAKŮ
+===================== */
+
+const TRAIN_TYPES = [
+  {
+    id: "810",
+    name: "Řada 810",
+    speed: 50,
+    capacity: 30,
+    price: 1_000_000,
+    image: "https://i.imgur.com/neFFZgt.png"
+  },
+  {
+    id: "844",
+    name: "RegioShark",
+    speed: 60,
+    capacity: 60,
+    price: 3_000_000,
+    image: "https://i.imgur.com/jXoYbZs.png"
+  },
+  {
+    id: "440",
+    name: "RegioPanter",
+    speed: 70,
+    capacity: 200,
+    price: 10_000_000,
+    image: "https://i.imgur.com/0wL4K2Q.png"
+  }
+];
+
+/* =====================
+   UI
+===================== */
+    
+    function toggleMenu() {
+  document.getElementById("panel")
+    .classList.toggle("hidden");
+}
+
+function updateUI() {
+  document.getElementById("money").textContent =
+    game.money.toLocaleString() + " Kč";
+
+  document.getElementById("pax").textContent =
+    game.passengersPerMinute;
+
+  const t = document.getElementById("trains");
+  t.innerHTML = "";
+
+  TRAIN_TYPES.forEach(type => {
+    const div = document.createElement("div");
+    div.className = "trainCard";
+    div.innerHTML = `
+      <b>${type.name}</b><br>
+      ${type.speed} km/h | 👥 ${type.capacity}<br>
+      💰 ${type.price.toLocaleString()} Kč<br>
+      <button>Koupit</button>
+    `;
+    div.querySelector("button").onclick = () => buyTrain(type.id);
+    t.appendChild(div);
+  });
+}
+
+updateUI();
+
+/* =====================
+   STANICE (OVERPASS)
+===================== */
+
+function loadStations() {
+  const q = `
+  [out:json];
+  node(around:10000,49.255, 13.916)["railway"~"station|halt"];
+  out;
+  `;
+
+  fetch("https://overpass-api.de/api/interpreter", {
+    method: "POST",
+    body: q
+  })
+  .then(r => r.json())
+  .then(data => {
+    data.elements.forEach(n => {
+      const s = {
+  id: n.id,
+  lat: n.lat,
+  lon: n.lon,
+  name: n.tags.name || "Zastávka",
+  type: n.tags.railway === "station" ? "station" : "halt",
+  owned: false,
+
+  passengers: [],   // 👥 čekající cestující
+  spawnRate: 0      // kolik / min
+};
+
+      const m = L.marker([s.lat, s.lon], {
+        icon: stationIcon(s.type)
+      }).addTo(layers.stations);
+
+      m.on("click", () => stationClick(s, m));
+      game.stations[s.id] = s;
+    });
+  });
+}
+
+loadStations();
+  
+  function openStationPopup(station, marker) {
+  const waiting = station.passengers.length;
+
+  const destinations = {};
+  station.passengers.forEach(p => {
+    destinations[p.to] = (destinations[p.to] || 0) + 1;
+  });
+
+  let destHtml = "";
+  Object.entries(destinations).forEach(([id, count]) => {
+    const name = game.stations[id]?.name || "???";
+    destHtml += `${name}: ${count}<br>`;
+  });
+
+  stationPopup
+    .setLatLng(marker.getLatLng())
+    .setContent(`
+      <b>${station.name}</b><br>
+      👥 Čeká: ${waiting}<br>
+      <hr>
+      ${destHtml || "Žádní cestující"}
+    `)
+    .openOn(map);
+}
+  
+  /* =====================
+   KLIK NA STANICI
+===================== */
+
+function stationClick(station, marker) {
+
+  // Pokud jsme v módu kupování
+  if (mode === "buyStation" && !station.owned) {
+
+    if (game.money < 500_000) {
+      // Nedostatek peněz → klasický info popup
+      stationPopup
+        .setLatLng(marker.getLatLng())
+        .setContent(`Nemáš dost peněz na koupi stanice ${station.name}.`)
+        .openOn(map);
+      return;
+    }
+
+    // Popup s potvrzením
+    stationPopup
+      .setLatLng(marker.getLatLng())
+      .setContent(`
+        Chceš postavit stanici <b>${station.name}</b>?<br>
+        <button id="buyYes">Ano</button> 
+        <button id="buyNo">Ne</button>
+      `)
+      .openOn(map);
+
+    // Event listener pro tlačítka
+    setTimeout(() => { // musí být timeout, aby DOM existoval
+      const yes = document.getElementById("buyYes");
+      const no = document.getElementById("buyNo");
+
+      yes?.addEventListener("click", () => {
+        station.owned = true;
+        station.spawnRate = 1 + Math.random() * 3;
+        game.money -= 500_000;
+        recalcPassengers();
+        updateUI();
+
+        // Potvrzení koupě
+        stationPopup
+          .setContent(`Postavil jsi stanici <b>${station.name}</b>.`)
+          .openOn(map);
+
+        // Popup se po chvíli zavře
+        setTimeout(() => map.closePopup(stationPopup), 2000);
+      });
+
+      no?.addEventListener("click", () => {
+        map.closePopup(stationPopup); // zrušit popup
+      });
+    }, 50);
+
+    return; // zastavíme další logiku
+  }
+
+  // Otevření běžného info popupu (pro stavění tratě nebo info)
+  openStationPopup(station, marker);
+
+  // Mód stavby tratě
+  if (mode === "buildTrack") {
+    if (!station.owned) return;
+
+    if (!selectedStation) {
+      selectedStation = station;
+    } else {
+      buildTrack(selectedStation, station);
+      selectedStation = null;
+    }
+  }
+}
+  
+  function createPassenger(fromStationId) {
+  const ownedStations = Object.values(game.stations)
+    .filter(s => s.owned && s.id !== fromStationId);
+
+  if (ownedStations.length === 0) return null;
+
+  const target =
+    ownedStations[Math.floor(Math.random() * ownedStations.length)];
+
+  return {
+    id: crypto.randomUUID(),
+    from: fromStationId,
+    to: target.id,
+    progress: 0   // pro budoucí přestupy
+  };
+}
+/* =====================
+   TRAŤ
+===================== */
+
+function buildTrack(a, b) {
+  const coords = [
+    [a.lat, a.lon],
+    [b.lat, b.lon]
+  ];
+
+  const line = L.polyline(coords, {
+    color: "black",
+    weight: 4
+  }).addTo(layers.tracks);
+
+  const lengthKm = map.distance(coords[0], coords[1]) / 1000;
+  const cost = lengthKm * 1_000_000;
+
+  if (game.money < cost) {
+    map.removeLayer(line);
+    return;
+  }
+
+  game.money -= cost;
+
+  game.tracks.push({
+    a, b, coords, lengthKm, trains: []
+  });
+
+  updateUI();
+}
+
+/* =====================
+   CESTUJÍCÍ
+===================== */
+
+function recalcPassengers() {
+  const open = Object.values(game.stations).filter(s => s.owned).length;
+  game.passengersPerMinute = Math.round(open * open * 2);
+}
+  
+  /* =====================
+   GENEROVÁNÍ CESTUJÍCÍCH (GLOBÁLNÍ TICK)
+===================== */
+
+setInterval(() => {
+  Object.values(game.stations).forEach(station => {
+    if (!station.owned) return;
+
+    const count = Math.floor(station.spawnRate || 0);
+    for (let i = 0; i < count; i++) {
+      const p = createPassenger(station.id);
+      if (p) station.passengers.push(p);
+    }
+  });
+}, 60_000); // 1 minuta herního času
+
+/* =====================
+   VLAKY
+===================== */
+
+function buyTrain(typeId) {
+  const type = TRAIN_TYPES.find(t => t.id === typeId);
+  if (!type || game.money < type.price || game.tracks.length === 0) return;
+
+  game.money -= type.price;
+
+  const track = game.tracks[0];
+
+  const marker = L.marker(track.coords[0], {
+    icon: L.divIcon({html:"🚆", className:""})
+  }).addTo(layers.trains);
+
+  const train = {
+    id: crypto.randomUUID(),
+    type,
+    track,
+    progress: 0,
+    dir: 1,
+    marker,
+    passengers: []
+  };
+
+  game.trains[train.id] = train;
+  track.trains.push(train);
+
+  updateUI();
+}
+
+/* =====================
+   POHYB VLAKŮ
+===================== */
+
+let last = performance.now();
+
+function loop(now) {
+  const dt = (now - last) / 1000;
+  last = now;
+
+  Object.values(game.trains).forEach(t => {
+    const speed = t.type.speed / 3600;
+    t.progress += speed * dt * t.dir;
+
+    if (t.progress >= t.track.lengthKm || t.progress <= 0) {
+
+  const station =
+    t.dir === 1 ? t.track.b : t.track.a;
+
+  const available = station.passengers.splice(
+    0,
+    t.type.capacity
+  );
+
+  t.passengers = available;
+
+  game.money += available.length * t.track.lengthKm * 2;
+
+  t.dir *= -1;
+}
+    const ratio = Math.abs(t.progress / t.track.lengthKm);
+    const lat =
+      t.track.coords[0][0] +
+      (t.track.coords[1][0] - t.track.coords[0][0]) * ratio;
+    const lon =
+      t.track.coords[0][1] +
+      (t.track.coords[1][1] - t.track.coords[0][1]) * ratio;
+
+    t.marker.setLatLng([lat, lon]);
+  });
+
+  updateUI();
+  requestAnimationFrame(loop);
+}
+
+requestAnimationFrame(loop);
+</script>
+
+</body>
+</html>
