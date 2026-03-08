@@ -508,7 +508,7 @@ out center;`;
       container.destination = town.name;
 container.destLat = town.lat;
 container.destLng = town.lng;
-container.dist = dist;
+container.dist = Number(dist.toFixed(1));
 container.reward = Math.round(dist * KILOMETRE_PRICE);
       return container;
     }
