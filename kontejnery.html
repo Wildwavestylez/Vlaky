@@ -506,8 +506,10 @@ out center;`;
       const town = randFrom(towns);
       const dist = haversineKm(TERMINAL, town);
       container.destination = town.name;
-      container.dist = dist.toFixed(1);
-      container.reward = Math.round(dist * KILOMETRE_PRICE);
+container.destLat = town.lat;
+container.destLng = town.lng;
+container.dist = dist;
+container.reward = Math.round(dist * KILOMETRE_PRICE);
       return container;
     }
 
@@ -613,8 +615,10 @@ document.getElementById('buyTruckBtn').addEventListener('click', ()=>{
     return;  
   }  
 
-  const destTown = towns.find(t=>t.name===cont.destination);  
-
+  const destTown = {
+  lat: cont.destLat,
+  lng: cont.destLng
+};
   // ihned odeber kontejner z meziskladu (po naložení), i když destinace neplatná
   warehouse.splice(warehouseIndex, 1);  
   renderWarehouse();  
