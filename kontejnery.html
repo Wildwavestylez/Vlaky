@@ -108,6 +108,7 @@
     let money = 0;
     let deliveredCount = 0;
     let nextExpansionThreshold = 5;
+    let knownTownNames = new Set(); 
 
 let TRUCK_PRICE = 0;              
     const cargoTypes = [
@@ -413,30 +414,38 @@ let TRUCK_PRICE = 0;
     initMap();
 
     // ----------- Overpass fetch ----------
-    async function fetchTowns(radiusKm){
-      towns = [];
-      const radiusM = Math.round(radiusKm * 1000);
-      const q = `
-[out:json][timeout:25];
-(
-  node["place"~"town|village"](around:${radiusM},${TERMINAL.lat},${TERMINAL.lng});
-  way["place"~"town|village"](around:${radiusM},${TERMINAL.lat},${TERMINAL.lng});
-);
-out center;`;
-      try{
-        const resp = await fetch(OVERPASS_ENDPOINT, {method:'POST',body:q});
-        const data = await resp.json();
-        data.elements.forEach(el=>{
-          let lat = el.lat || (el.center && el.center.lat);
-          let lon = el.lon || (el.center && el.center.lon);
-          let name = el.tags && (el.tags.name || el.tags['name:cs'] || el.tags['name:en']);
-          if(name && lat && lon){ towns.push({name, lat, lng:lon}); }
-        });
-        const unique = {};
-        towns = towns.filter(t=>{if(unique[t.name]) return false; unique[t.name]=true; return true;});
-      }catch(err){ console.error(err); }
-    }
-    fetchTowns(fetchRadiusKm);
+  async function fetchTowns(radiusKm){
+  const radiusM = Math.round(radiusKm * 1000);
+  const q = `[out:json][timeout:25];
+  (
+    node["place"~"town|village"](around:${radiusM},${TERMINAL.lat},${TERMINAL.lng});
+    way["place"~"town|village"](around:${radiusM},${TERMINAL.lat},${TERMINAL.lng});
+  );
+  out center;`;
+
+  try {
+    const resp = await fetch(OVERPASS_ENDPOINT, {method:'POST',body:q});
+    const data = await resp.json();
+    let newTowns = [];
+    data.elements.forEach(el => {
+      const lat = el.lat || (el.center && el.center.lat);
+      const lon = el.lon || (el.center && el.center.lon);
+      const name = el.tags && (el.tags.name || el.tags['name:cs'] || el.tags['name:en']);
+      if(name && lat && lon && !knownTownNames.has(name)){
+        knownTownNames.add(name);
+        newTowns.push({name, lat, lng: lon});
+      }
+    });
+    towns.push(...newTowns);
+    console.log(`Nově načteno ${newTowns.length} měst, celkem towns: ${towns.length}`);
+  } catch(err){
+    console.error(err);
+  }
+
+  if(towns.length === 0) {
+    alert('Nepodařilo se načíst žádné nové obce – zkontroluj Overpass API');
+  }
+}
 
     // ----------- helpers ----------
     function haversineKm(a,b){
