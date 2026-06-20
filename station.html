@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Train Operations MVP</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+<style>
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  overflow: hidden;
+}
+
+/* MAPA */
+#map {
+  height: 55vh;
+  width: 100%;
+}
+
+/* UI PANEL */
+#ui {
+  height: 45vh;
+  background: #111;
+  color: white;
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+/* VLAK BOX */
+#trainBox {
+  background: #1c1c1c;
+  padding: 10px;
+  border-radius: 10px;
+  margin-bottom: 10px;
+}
+
+.bar {
+  height: 10px;
+  background: #333;
+  border-radius: 5px;
+  overflow: hidden;
+  margin: 5px 0;
+}
+
+.bar-fill {
+  height: 100%;
+  width: 0%;
+  background: limegreen;
+}
+
+/* TLAČÍTKA */
+button {
+  width: 32%;
+  padding: 10px;
+  margin: 2px;
+  border: none;
+  border-radius: 8px;
+  font-weight: bold;
+}
+
+#clean { background: #4caf50; }
+#catering { background: #ff9800; }
+#tech { background: #03a9f4; }
+
+#depart {
+  width: 100%;
+  margin-top: 10px;
+  background: red;
+  color: white;
+}
+
+/* STATS */
+#stats {
+  margin-bottom: 10px;
+}
+</style>
+</head>
+
+<body>
+
+<div id="map"></div>
+
+<div id="ui">
+
+  <div id="stats">
+    💰 Peníze: <span id="money">0</span> Kč |
+    🏗️ Koleje: 1
+  </div>
+
+  <div id="trainBox">
+    🚂 <b id="trainName">Čekám na vlak...</b><br>
+    ⏱️ Čas do odjezdu: <span id="time">--</span>
+
+    <div>
+      🧹 Úklid
+      <div class="bar"><div id="cleanBar" class="bar-fill"></div></div>
+
+      🍔 Catering
+      <div class="bar"><div id="cateringBar" class="bar-fill"></div></div>
+
+      🔧 Technika
+      <div class="bar"><div id="techBar" class="bar-fill"></div></div>
+    </div>
+
+    <button id="depart">ODJEZD</button>
+  </div>
+
+  <div>
+    <button id="clean">Úklid</button>
+    <button id="catering">Catering</button>
+    <button id="tech">Technika</button>
+  </div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+// ---------------- MAPA ----------------
+const map = L.map('map').setView([49.7384, 13.3736], 13); // Plzeň
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19
+}).addTo(map);
+
+L.marker([49.7384, 13.3736]).addTo(map)
+  .bindPopup("Plzeň hlavní nádraží")
+  .openPopup();
+
+// ---------------- GAME STATE ----------------
+let money = 0;
+
+let currentTrain = null;
+let timeLeft = 0;
+
+let intervals = {
+  clean: 0,
+  catering: 0,
+  tech: 0
+};
+
+// ---------------- UI ----------------
+function updateUI() {
+  document.getElementById("money").innerText = money;
+
+  if (!currentTrain) return;
+
+  document.getElementById("trainName").innerText = currentTrain.name;
+  document.getElementById("time").innerText = timeLeft + " s";
+
+  document.getElementById("cleanBar").style.width = intervals.clean + "%";
+  document.getElementById("cateringBar").style.width = intervals.catering + "%";
+  document.getElementById("techBar").style.width = intervals.tech + "%";
+}
+
+// ---------------- TRAIN LOGIC ----------------
+function spawnTrain() {
+  const trains = [
+    { name: "810 → Rokycany", time: 30, reward: 100 },
+    { name: "810 → Přeštice", time: 30, reward: 100 },
+    { name: "Rychlík Praha → Plzeň", time: 45, reward: 250 }
+  ];
+
+  currentTrain = trains[Math.floor(Math.random() * trains.length)];
+  timeLeft = currentTrain.time;
+
+  intervals.clean = 0;
+  intervals.catering = 0;
+  intervals.tech = 0;
+
+  updateUI();
+}
+
+// ---------------- ACTIONS ----------------
+function doAction(type) {
+  if (!currentTrain) return;
+
+  if (intervals[type] >= 100) return;
+
+  intervals[type] += 25;
+  if (intervals[type] > 100) intervals[type] = 100;
+
+  updateUI();
+}
+
+document.getElementById("clean").onclick = () => doAction("clean");
+document.getElementById("catering").onclick = () => doAction("catering");
+document.getElementById("tech").onclick = () => doAction("tech");
+
+// ---------------- DEPART ----------------
+document.getElementById("depart").onclick = () => {
+  if (!currentTrain) return;
+
+  if (intervals.clean < 100 || intervals.catering < 100) {
+    alert("Není hotovo!");
+    return;
+  }
+
+  money += currentTrain.reward;
+  currentTrain = null;
+
+  updateUI();
+
+  setTimeout(spawnTrain, 2000);
+};
+
+// ---------------- TIMER ----------------
+setInterval(() => {
+  if (!currentTrain) return;
+
+  timeLeft--;
+
+  if (timeLeft <= 0) {
+    alert("Vlak odjel / nebo jsi to nestihl!");
+    currentTrain = null;
+    setTimeout(spawnTrain, 2000);
+  }
+
+  updateUI();
+}, 1000);
+
+// START
+spawnTrain();
+updateUI();
+</script>
+
+</body>
+</html>
