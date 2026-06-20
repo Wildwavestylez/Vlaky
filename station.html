@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Train Operations - Core</title>
+<title>Train Operations - State Machine MVP</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 
@@ -16,12 +16,11 @@ body {
   flex-direction: column;
 }
 
-/* MAPA */
 #map {
   flex: 1;
 }
 
-/* BOTTOM PANEL */
+/* UI */
 #ui {
   height: 45vh;
   background: #111;
@@ -33,7 +32,7 @@ body {
   overflow: hidden;
 }
 
-/* TOP STATS */
+/* STATS */
 #stats {
   padding: 8px;
   background: #1c1c1c;
@@ -44,7 +43,6 @@ body {
 #content {
   display: flex;
   flex: 1;
-  overflow: hidden;
 }
 
 /* QUEUE */
@@ -52,13 +50,11 @@ body {
   width: 40%;
   background: #151515;
   overflow-y: auto;
-  padding: 5px;
-  border-right: 1px solid #333;
 }
 
 .queueItem {
-  padding: 8px;
-  margin: 5px;
+  padding: 10px;
+  margin: 6px;
   background: #222;
   border-radius: 8px;
   cursor: pointer;
@@ -76,30 +72,32 @@ body {
 }
 
 button {
-  margin: 3px;
-  padding: 8px;
+  margin: 4px;
+  padding: 10px;
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   font-weight: bold;
   cursor: pointer;
 }
 
-.clean { background: #4caf50; }
-.board { background: #2196f3; }
-.depart { background: #f44336; }
-
-.bar {
-  height: 8px;
-  background: #333;
-  border-radius: 4px;
-  overflow: hidden;
-  margin: 5px 0;
+.action {
+  background: #2196f3;
 }
 
-.fill {
-  height: 100%;
-  width: 0%;
-  background: limegreen;
+.depart {
+  background: #f44336;
+}
+
+.phaseBox {
+  margin-top: 10px;
+  padding: 8px;
+  background: #1c1c1c;
+  border-radius: 8px;
+}
+
+.timer {
+  font-size: 18px;
+  margin: 5px 0;
 }
 </style>
 </head>
@@ -116,28 +114,22 @@ button {
 
   <div id="content">
 
-    <!-- QUEUE -->
     <div id="queue"></div>
 
-    <!-- DETAIL -->
     <div id="detail">
-      <h3 id="tName">Vyber vlak</h3>
-      <p id="tState">---</p>
-      <p>Track: <span id="tTrack">-</span></p>
+      <h3 id="name">Vyber vlak</h3>
+      <p id="state">---</p>
+      <p>🚉 Track: <span id="track">-</span></p>
 
-      <div>
-        🧹 Úklid
-        <div class="bar"><div id="cleanBar" class="fill"></div></div>
-
-        🚶 Výstup
-        <div class="bar"><div id="exitBar" class="fill"></div></div>
-
-        🚶 Nástup
-        <div class="bar"><div id="boardBar" class="fill"></div></div>
+      <div class="phaseBox">
+        ⏱️ Timer: <div class="timer" id="timer">--</div>
+        📍 Phase: <span id="phase">---</span>
       </div>
 
-      <button class="clean" onclick="action('clean')">ÚKLID</button>
-      <button class="board" onclick="action('board')">NÁSTUP</button>
+      <img id="img" style="width:100%; border-radius:10px; margin-top:10px; display:none;" />
+
+      <div id="actions"></div>
+
       <button class="depart" onclick="depart()">ODJEZD</button>
     </div>
 
@@ -154,79 +146,42 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
 // 💰 STATE
 let money = 0;
-let selectedTrain = null;
+let selected = null;
 
 // 🚉 KOLEJE
-const tracks = [null, null];
+let tracks = [null, null];
 
-// 🚂 VLACÍ DATA
+// 🚂 VLAKY (STATE MACHINE)
 let trains = [
-  {
-    id: 1,
-    name: "810 → Rokycany",
-    state: "APPROACHING",
-    progress: { clean: 0, exit: 0, board: 0 },
-    track: null
-  },
-  {
-    id: 2,
-    name: "810 → Přeštice",
-    state: "APPROACHING",
-    progress: { clean: 0, exit: 0, board: 0 },
-    track: null
-  },
-  {
-    id: 3,
-    name: "Rychlík Praha → Plzeň",
-    state: "APPROACHING",
-    progress: { clean: 0, exit: 0, board: 0 },
-    track: null
+{
+  id: 1,
+  name: "810 → Rokycany",
+  image: "https://i.imgur.com/SSg8BRL.jpg",
+  state: "APPROACHING",
+  track: null,
+  phase: null,
+  timer: 0,
+  phases: {
+    DISEMBARKING: 20,
+    CLEANING: 180,
+    BOARDING: 20
   }
+},
+{
+  id: 2,
+  name: "810 → Přeštice",
+  image: "https://i.imgur.com/SSg8BRL.jpg",
+  state: "APPROACHING",
+  track: null,
+  phase: null,
+  timer: 0,
+  phases: {
+    DISEMBARKING: 20,
+    CLEANING: 180,
+    BOARDING: 20
+  }
+}
 ];
-
-// 📋 QUEUE RENDER
-function renderQueue() {
-  const q = document.getElementById("queue");
-  q.innerHTML = "";
-
-  trains.forEach(t => {
-    const div = document.createElement("div");
-    div.className = "queueItem";
-    div.innerText = `${t.name} [${t.state}]`;
-    div.onclick = () => selectTrain(t);
-    q.appendChild(div);
-  });
-}
-
-// 🎯 SELECT TRAIN
-function selectTrain(t) {
-  selectedTrain = t;
-
-  document.getElementById("tName").innerText = t.name;
-  document.getElementById("tState").innerText = t.state;
-  document.getElementById("tTrack").innerText = t.track ?? "-";
-
-  updateBars();
-}
-
-// 📊 BARS
-function updateBars() {
-  if (!selectedTrain) return;
-
-  document.getElementById("cleanBar").style.width = selectedTrain.progress.clean + "%";
-  document.getElementById("exitBar").style.width = selectedTrain.progress.exit + "%";
-  document.getElementById("boardBar").style.width = selectedTrain.progress.board + "%";
-}
-
-// ⚙️ ACTIONS
-function action(type) {
-  if (!selectedTrain) return;
-
-  selectedTrain.progress[type] += 25;
-  if (selectedTrain.progress[type] > 100) selectedTrain.progress[type] = 100;
-
-  updateBars();
-}
 
 // 🚉 ASSIGN TRACK
 function assignTrack(train) {
@@ -240,49 +195,131 @@ function assignTrack(train) {
   }
 }
 
-// 🚂 SPAWN LOGIC
-function gameLoop() {
+// 📋 QUEUE
+function renderQueue() {
+  const q = document.getElementById("queue");
+  q.innerHTML = "";
+
+  trains.forEach(t => {
+    const div = document.createElement("div");
+    div.className = "queueItem";
+    div.innerHTML = `${t.name}<br><small>${t.state}</small>`;
+    div.onclick = () => select(t);
+    q.appendChild(div);
+  });
+}
+
+// 🎯 SELECT
+function select(t) {
+  selected = t;
+
+  document.getElementById("name").innerText = t.name;
+  document.getElementById("state").innerText = t.state;
+  document.getElementById("track").innerText = t.track ?? "-";
+
+  document.getElementById("img").src = t.image;
+  document.getElementById("img").style.display = "block";
+
+  renderActions();
+}
+
+// ⚙️ ACTION BUTTONS
+function renderActions() {
+  const a = document.getElementById("actions");
+  a.innerHTML = "";
+
+  if (!selected) return;
+
+  if (selected.state === "ARRIVED") {
+    a.innerHTML += `<button class="action" onclick="start('DISEMBARKING')">VYLOŽIT CESTUJÍCÍ</button>`;
+  }
+
+  if (selected.state === "READY_CLEANING") {
+    a.innerHTML += `<button class="action" onclick="start('CLEANING')">ÚKLID</button>`;
+  }
+
+  if (selected.state === "READY_BOARDING") {
+    a.innerHTML += `<button class="action" onclick="start('BOARDING')">NÁSTUP</button>`;
+  }
+}
+
+// ▶️ START PHASE
+function start(phase) {
+  if (!selected) return;
+
+  selected.phase = phase;
+  selected.timer = selected.phases[phase];
+}
+
+// 🚂 DEPART
+function depart() {
+  if (!selected) return;
+  if (selected.state !== "READY_DEPARTURE") return;
+
+  money += 100;
+  document.getElementById("money").innerText = money;
+
+  tracks[selected.track - 1] = null;
+
+  selected.state = "DEPARTED";
+  selected = null;
+}
+
+// 🔁 ADVANCE STATE
+function advance(t) {
+  if (t.phase === "DISEMBARKING") {
+    t.state = "READY_CLEANING";
+  }
+
+  if (t.phase === "CLEANING") {
+    t.state = "READY_BOARDING";
+  }
+
+  if (t.phase === "BOARDING") {
+    t.state = "READY_DEPARTURE";
+  }
+
+  t.phase = null;
+}
+
+// ⏱️ GAME LOOP
+setInterval(() => {
+
   trains.forEach(t => {
 
     if (t.state === "APPROACHING") {
       assignTrack(t);
     }
 
-    if (t.progress.clean >= 100 && t.progress.exit >= 100 && t.state === "ARRIVED") {
-      t.state = "BOARDING";
-    }
+    if (t.timer > 0) {
+      t.timer--;
 
-    if (t.progress.board >= 100 && t.state === "BOARDING") {
-      t.state = "READY";
+      if (t.timer === 0) {
+        advance(t);
+      }
     }
   });
 
+  updateUI();
   renderQueue();
-  if (selectedTrain) selectTrain(selectedTrain);
+
+}, 1000);
+
+// 🎨 UI UPDATE
+function updateUI() {
+
+  if (!selected) return;
+
+  document.getElementById("state").innerText = selected.state;
+  document.getElementById("track").innerText = selected.track ?? "-";
+  document.getElementById("phase").innerText = selected.phase ?? "---";
+  document.getElementById("timer").innerText = selected.timer + "s";
+
+  renderActions();
 }
 
-// 🚂 DEPART
-function depart() {
-  if (!selectedTrain) return;
-  if (selectedTrain.state !== "READY") return;
-
-  money += 100;
-  document.getElementById("money").innerText = money;
-
-  tracks[selectedTrain.track - 1] = null;
-
-  selectedTrain.state = "DEPARTED";
-  selectedTrain.track = null;
-
-  selectedTrain = null;
-
-  gameLoop();
-}
-
-// LOOP
-setInterval(gameLoop, 1000);
-
-gameLoop();
+// START
+renderQueue();
 
 </script>
 
