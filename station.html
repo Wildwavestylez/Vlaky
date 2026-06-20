@@ -10,21 +10,31 @@
 <style>
 body {
   margin: 0;
-  font-family: Arial;
   height: 100vh;
   display: flex;
   flex-direction: column;
+  font-family: Arial;
 }
 
+/* MAPA */
 #map {
   flex: 1;
 }
 
+/* BOTTOM PANEL */
 #ui {
-  flex: 0 0 auto;
-  padding-bottom: env(safe-area-inset-bottom, 20px);
+  height: 45vh;
   background: #111;
   color: white;
+  padding: 10px;
+  box-sizing: border-box;
+
+  border-top-left-radius: 15px;
+  border-top-right-radius: 15px;
+
+  box-shadow: 0 -5px 20px rgba(0,0,0,0.4);
+  overflow-y: auto;
+  padding-bottom: env(safe-area-inset-bottom, 10px);
 }
 
 /* VLAK BOX */
