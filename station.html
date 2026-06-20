@@ -3,17 +3,17 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Train Operations MVP</title>
+<title>Train Operations - Core</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 
 <style>
 body {
   margin: 0;
+  font-family: Arial;
   height: 100vh;
   display: flex;
   flex-direction: column;
-  font-family: Arial;
 }
 
 /* MAPA */
@@ -26,63 +26,80 @@ body {
   height: 45vh;
   background: #111;
   color: white;
-  padding: 10px;
-  box-sizing: border-box;
-
-  border-top-left-radius: 15px;
-  border-top-right-radius: 15px;
-
-  box-shadow: 0 -5px 20px rgba(0,0,0,0.4);
-  overflow-y: auto;
-  padding-bottom: env(safe-area-inset-bottom, 10px);
+  display: flex;
+  flex-direction: column;
+  border-top-left-radius: 14px;
+  border-top-right-radius: 14px;
+  overflow: hidden;
 }
 
-/* VLAK BOX */
-#trainBox {
+/* TOP STATS */
+#stats {
+  padding: 8px;
   background: #1c1c1c;
-  padding: 10px;
-  border-radius: 10px;
-  margin-bottom: 10px;
+  font-size: 14px;
 }
+
+/* LAYOUT */
+#content {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* QUEUE */
+#queue {
+  width: 40%;
+  background: #151515;
+  overflow-y: auto;
+  padding: 5px;
+  border-right: 1px solid #333;
+}
+
+.queueItem {
+  padding: 8px;
+  margin: 5px;
+  background: #222;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.queueItem:hover {
+  background: #333;
+}
+
+/* DETAIL */
+#detail {
+  flex: 1;
+  padding: 10px;
+}
+
+button {
+  margin: 3px;
+  padding: 8px;
+  border: none;
+  border-radius: 6px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.clean { background: #4caf50; }
+.board { background: #2196f3; }
+.depart { background: #f44336; }
 
 .bar {
-  height: 10px;
+  height: 8px;
   background: #333;
-  border-radius: 5px;
+  border-radius: 4px;
   overflow: hidden;
   margin: 5px 0;
 }
 
-.bar-fill {
+.fill {
   height: 100%;
   width: 0%;
   background: limegreen;
-}
-
-/* TLAČÍTKA */
-button {
-  width: 32%;
-  padding: 10px;
-  margin: 2px;
-  border: none;
-  border-radius: 8px;
-  font-weight: bold;
-}
-
-#clean { background: #4caf50; }
-#catering { background: #ff9800; }
-#tech { background: #03a9f4; }
-
-#depart {
-  width: 100%;
-  margin-top: 10px;
-  background: red;
-  color: white;
-}
-
-/* STATS */
-#stats {
-  margin-bottom: 10px;
 }
 </style>
 </head>
@@ -94,145 +111,179 @@ button {
 <div id="ui">
 
   <div id="stats">
-    💰 Peníze: <span id="money">0</span> Kč |
-    🏗️ Koleje: 1
+    💰 <span id="money">0</span> Kč | 🚉 Plzeň | Koleje: 2
   </div>
 
-  <div id="trainBox">
-    🚂 <b id="trainName">Čekám na vlak...</b><br>
-    ⏱️ Čas do odjezdu: <span id="time">--</span>
+  <div id="content">
 
-    <div>
-      🧹 Úklid
-      <div class="bar"><div id="cleanBar" class="bar-fill"></div></div>
+    <!-- QUEUE -->
+    <div id="queue"></div>
 
-      🍔 Catering
-      <div class="bar"><div id="cateringBar" class="bar-fill"></div></div>
+    <!-- DETAIL -->
+    <div id="detail">
+      <h3 id="tName">Vyber vlak</h3>
+      <p id="tState">---</p>
+      <p>Track: <span id="tTrack">-</span></p>
 
-      🔧 Technika
-      <div class="bar"><div id="techBar" class="bar-fill"></div></div>
+      <div>
+        🧹 Úklid
+        <div class="bar"><div id="cleanBar" class="fill"></div></div>
+
+        🚶 Výstup
+        <div class="bar"><div id="exitBar" class="fill"></div></div>
+
+        🚶 Nástup
+        <div class="bar"><div id="boardBar" class="fill"></div></div>
+      </div>
+
+      <button class="clean" onclick="action('clean')">ÚKLID</button>
+      <button class="board" onclick="action('board')">NÁSTUP</button>
+      <button class="depart" onclick="depart()">ODJEZD</button>
     </div>
 
-    <button id="depart">ODJEZD</button>
   </div>
-
-  <div>
-    <button id="clean">Úklid</button>
-    <button id="catering">Catering</button>
-    <button id="tech">Technika</button>
-  </div>
-
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
-// ---------------- MAPA ----------------
-const map = L.map('map').setView([49.7384, 13.3736], 13); // Plzeň
 
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 19
-}).addTo(map);
+// 🌍 MAPA
+const map = L.map('map').setView([49.7384, 13.3736], 13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-L.marker([49.7384, 13.3736]).addTo(map)
-  .bindPopup("Plzeň hlavní nádraží")
-  .openPopup();
-
-// ---------------- GAME STATE ----------------
+// 💰 STATE
 let money = 0;
+let selectedTrain = null;
 
-let currentTrain = null;
-let timeLeft = 0;
+// 🚉 KOLEJE
+const tracks = [null, null];
 
-let intervals = {
-  clean: 0,
-  catering: 0,
-  tech: 0
-};
+// 🚂 VLACÍ DATA
+let trains = [
+  {
+    id: 1,
+    name: "810 → Rokycany",
+    state: "APPROACHING",
+    progress: { clean: 0, exit: 0, board: 0 },
+    track: null
+  },
+  {
+    id: 2,
+    name: "810 → Přeštice",
+    state: "APPROACHING",
+    progress: { clean: 0, exit: 0, board: 0 },
+    track: null
+  },
+  {
+    id: 3,
+    name: "Rychlík Praha → Plzeň",
+    state: "APPROACHING",
+    progress: { clean: 0, exit: 0, board: 0 },
+    track: null
+  }
+];
 
-// ---------------- UI ----------------
-function updateUI() {
+// 📋 QUEUE RENDER
+function renderQueue() {
+  const q = document.getElementById("queue");
+  q.innerHTML = "";
+
+  trains.forEach(t => {
+    const div = document.createElement("div");
+    div.className = "queueItem";
+    div.innerText = `${t.name} [${t.state}]`;
+    div.onclick = () => selectTrain(t);
+    q.appendChild(div);
+  });
+}
+
+// 🎯 SELECT TRAIN
+function selectTrain(t) {
+  selectedTrain = t;
+
+  document.getElementById("tName").innerText = t.name;
+  document.getElementById("tState").innerText = t.state;
+  document.getElementById("tTrack").innerText = t.track ?? "-";
+
+  updateBars();
+}
+
+// 📊 BARS
+function updateBars() {
+  if (!selectedTrain) return;
+
+  document.getElementById("cleanBar").style.width = selectedTrain.progress.clean + "%";
+  document.getElementById("exitBar").style.width = selectedTrain.progress.exit + "%";
+  document.getElementById("boardBar").style.width = selectedTrain.progress.board + "%";
+}
+
+// ⚙️ ACTIONS
+function action(type) {
+  if (!selectedTrain) return;
+
+  selectedTrain.progress[type] += 25;
+  if (selectedTrain.progress[type] > 100) selectedTrain.progress[type] = 100;
+
+  updateBars();
+}
+
+// 🚉 ASSIGN TRACK
+function assignTrack(train) {
+  for (let i = 0; i < tracks.length; i++) {
+    if (!tracks[i]) {
+      tracks[i] = train.id;
+      train.track = i + 1;
+      train.state = "ARRIVED";
+      return;
+    }
+  }
+}
+
+// 🚂 SPAWN LOGIC
+function gameLoop() {
+  trains.forEach(t => {
+
+    if (t.state === "APPROACHING") {
+      assignTrack(t);
+    }
+
+    if (t.progress.clean >= 100 && t.progress.exit >= 100 && t.state === "ARRIVED") {
+      t.state = "BOARDING";
+    }
+
+    if (t.progress.board >= 100 && t.state === "BOARDING") {
+      t.state = "READY";
+    }
+  });
+
+  renderQueue();
+  if (selectedTrain) selectTrain(selectedTrain);
+}
+
+// 🚂 DEPART
+function depart() {
+  if (!selectedTrain) return;
+  if (selectedTrain.state !== "READY") return;
+
+  money += 100;
   document.getElementById("money").innerText = money;
 
-  if (!currentTrain) return;
+  tracks[selectedTrain.track - 1] = null;
 
-  document.getElementById("trainName").innerText = currentTrain.name;
-  document.getElementById("time").innerText = timeLeft + " s";
+  selectedTrain.state = "DEPARTED";
+  selectedTrain.track = null;
 
-  document.getElementById("cleanBar").style.width = intervals.clean + "%";
-  document.getElementById("cateringBar").style.width = intervals.catering + "%";
-  document.getElementById("techBar").style.width = intervals.tech + "%";
+  selectedTrain = null;
+
+  gameLoop();
 }
 
-// ---------------- TRAIN LOGIC ----------------
-function spawnTrain() {
-  const trains = [
-    { name: "810 → Rokycany", time: 30, reward: 100 },
-    { name: "810 → Přeštice", time: 30, reward: 100 },
-    { name: "Rychlík Praha → Plzeň", time: 45, reward: 250 }
-  ];
+// LOOP
+setInterval(gameLoop, 1000);
 
-  currentTrain = trains[Math.floor(Math.random() * trains.length)];
-  timeLeft = currentTrain.time;
+gameLoop();
 
-  intervals.clean = 0;
-  intervals.catering = 0;
-  intervals.tech = 0;
-
-  updateUI();
-}
-
-// ---------------- ACTIONS ----------------
-function doAction(type) {
-  if (!currentTrain) return;
-
-  if (intervals[type] >= 100) return;
-
-  intervals[type] += 25;
-  if (intervals[type] > 100) intervals[type] = 100;
-
-  updateUI();
-}
-
-document.getElementById("clean").onclick = () => doAction("clean");
-document.getElementById("catering").onclick = () => doAction("catering");
-document.getElementById("tech").onclick = () => doAction("tech");
-
-// ---------------- DEPART ----------------
-document.getElementById("depart").onclick = () => {
-  if (!currentTrain) return;
-
-  if (intervals.clean < 100 || intervals.catering < 100) {
-    alert("Není hotovo!");
-    return;
-  }
-
-  money += currentTrain.reward;
-  currentTrain = null;
-
-  updateUI();
-
-  setTimeout(spawnTrain, 2000);
-};
-
-// ---------------- TIMER ----------------
-setInterval(() => {
-  if (!currentTrain) return;
-
-  timeLeft--;
-
-  if (timeLeft <= 0) {
-    alert("Vlak odjel / nebo jsi to nestihl!");
-    currentTrain = null;
-    setTimeout(spawnTrain, 2000);
-  }
-
-  updateUI();
-}, 1000);
-
-// START
-spawnTrain();
-updateUI();
 </script>
 
 </body>
