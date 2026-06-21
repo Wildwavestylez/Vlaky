@@ -168,7 +168,7 @@ let trains = [
   track: null,
   progress: { exit:0, clean:0, board:0 },
   timers: { exit:20, clean:120, board:20 },
-  dot: false
+  
 },
 {
   id: 2,
@@ -178,7 +178,7 @@ let trains = [
   track: null,
   progress: { exit:0, clean:0, board:0 },
   timers: { exit:20, clean:120, board:20 },
-  dot: false
+  
 },
 {
   id: 3,
@@ -188,7 +188,6 @@ let trains = [
   track: null,
   progress: {},
   timers: {},
-  dot: false,
   travel: 45,
   travelMax: 45
 }
@@ -218,8 +217,12 @@ function render(){
     let d = document.createElement("div");
     d.className = "train";
 
+    // 👉 správná logika zelené tečky
+    let isSelected = selected && selected.id === t.id;
+    let showDot = hasDot(t, isSelected);
+
     d.innerHTML = `
-      ${t.dot ? '<div class="dot"></div>' : ''}
+      ${showDot ? '<div class="dot"></div>' : ''}
       <b>${t.name}</b><br>
       <small>${t.state}</small>
     `;
@@ -238,14 +241,16 @@ function select(t){
   updateDetail();
 }
 
-
-function updateDot(train){
-  const waitingStates = ["WAIT_CLEAN", "WAIT_BOARD", "ARRIVED"];
-
-  train.dot =
-    waitingStates.includes(train.state) &&
-    selected?.id !== train.id;
+function hasDot(t, isSelected){
+  return (
+    (t.state === "WAIT_CLEAN" ||
+     t.state === "WAIT_BOARD" ||
+     t.state === "ARRIVED") &&
+    !isSelected
+  );
 }
+
+
 function updateDetail(){
 
   if(!selected) return;
