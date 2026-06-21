@@ -209,32 +209,54 @@ function assign(train){
 
 // 📋 QUEUE
 function render(){
+
   let q = document.getElementById("queue");
   q.innerHTML = "";
 
-  trains.forEach(t=>{
+  trains.forEach(t => {
+
     let d = document.createElement("div");
     d.className = "train";
 
-    if(t.dot) {
-      let dot = document.createElement("div");
-      dot.className = "dot";
-      d.appendChild(dot);
-    }
+    d.innerHTML = `
+      ${t.dot ? '<div class="dot"></div>' : ''}
+      <b>${t.name}</b><br>
+      <small>${t.state}</small>
+    `;
 
-    d.innerHTML += `<b>${t.name}</b><br><small>${t.state}</small>`;
-    d.onclick = ()=>select(t);
+    d.onclick = () => select(t);
 
     q.appendChild(d);
   });
+
+  updateDetail();
 }
 
 // 🎯 SELECT
 function select(t){
   selected = t;
-  document.getElementById("name").innerText = t.name;
-  document.getElementById("state").innerText = t.state;
-  document.getElementById("img").src = t.image;
+  updateDetail();
+}
+
+
+function updateDot(train){
+  const waitingStates = ["WAIT_CLEAN", "WAIT_BOARD", "ARRIVED"];
+
+  train.dot =
+    waitingStates.includes(train.state) &&
+    selected?.id !== train.id;
+}
+function updateDetail(){
+
+  if(!selected) return;
+
+  document.getElementById("name").innerText = selected.name;
+  document.getElementById("state").innerText = selected.state;
+  document.getElementById("img").src = selected.image;
+
+  document.getElementById("p1").style.width = (selected.progress.exit || 0) + "%";
+  document.getElementById("p2").style.width = (selected.progress.clean || 0) + "%";
+  document.getElementById("p3").style.width = (selected.progress.board || 0) + "%";
 
   renderActions();
 }
@@ -265,32 +287,46 @@ function renderActions(){
 
 // ▶️ START TIMER
 function start(type){
+
   if(!selected) return;
 
-  selected.active = type;
-  selected.timer = selected.timers[type];
+  let train = selected;
+
+  train.timer = train.timers[type];
+  train.active = type;
 
   let interval = setInterval(()=>{
-    selected.timer--;
 
-    let total = selected.timers[type];
-    let p = ((total - selected.timer)/total)*100;
-    selected.progress[type] = p;
+    train.timer--;
 
-    if(type==="exit") document.getElementById("p1").style.width=p+"%";
-    if(type==="clean") document.getElementById("p2").style.width=p+"%";
-    if(type==="board") document.getElementById("p3").style.width=p+"%";
+    let total = train.timers[type];
+    let p = ((total - train.timer)/total)*100;
 
-    if(selected.timer<=0){
+    train.progress[type] = p;
+
+    if(train.timer <= 0){
       clearInterval(interval);
 
-      if(type==="exit") selected.state="WAIT_CLEAN";
-      if(type==="clean") selected.state="WAIT_BOARD";
-      if(type==="board") selected.state="READY_DEPART";
+      if(type==="exit"){
+        train.state = "WAIT_CLEAN";
+        train.dot = true;
+      }
 
-      selected.dot = (selected.state!=="READY_DEPART");
+      if(type==="clean"){
+        train.state = "WAIT_BOARD";
+        train.dot = true;
+      }
+
+      if(type==="board"){
+        train.state = "READY_DEPART";
+        train.dot = true;
+      }
+
       render();
-      renderActions();
+    }
+
+    if(selected?.id === train.id){
+      updateDetail();
     }
 
   },1000);
