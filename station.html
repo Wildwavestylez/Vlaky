@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Train Operations - Engine v2 (Clean FSM)</title>
+<title>Train Ops - IDEAL ARCH v2</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 
@@ -15,30 +15,28 @@ body {
   font-family: Arial;
 }
 
-/* MAP */
+/* MAPA */
 #map {
-  height: calc(100vh - 55vh);
+  height: calc(100vh - 45vh);
 }
 
-/* UI */
+/* UI DRAWER (scrollovatelný jezdec) */
 #ui {
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
-  height: 55vh;
+  height: 45vh;
   background: #111;
   color: white;
-  display: flex;
-  flex-direction: column;
+  overflow-y: auto;
   border-top-left-radius: 16px;
   border-top-right-radius: 16px;
-  overflow: hidden;
 }
 
-/* TOP */
-#topbar {
-  padding: 6px;
+/* HEADER */
+#top {
+  padding: 8px;
   background: #1c1c1c;
   font-size: 13px;
 }
@@ -46,8 +44,6 @@ body {
 /* LAYOUT */
 #content {
   display: flex;
-  flex: 1;
-  overflow: hidden;
 }
 
 /* QUEUE */
@@ -57,13 +53,23 @@ body {
   overflow-y: auto;
 }
 
-.trainItem {
+.train {
   padding: 8px;
   margin: 6px;
   background: #222;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 12px;
+  position: relative;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  background: limegreen;
+  border-radius: 50%;
+  position: absolute;
+  right: 8px;
+  top: 8px;
 }
 
 /* DETAIL */
@@ -77,26 +83,25 @@ img {
   border-radius: 10px;
 }
 
-/* BUTTONS */
+/* BUTTONY */
 button {
-  margin: 3px;
+  margin: 4px;
   padding: 8px;
-  border-radius: 6px;
   border: none;
+  border-radius: 8px;
   font-weight: bold;
-  cursor: pointer;
 }
 
-.green { background: #4caf50; }
-.blue { background: #2196f3; }
-.red { background: #f44336; }
-.orange { background: #ff9800; }
+.g { background: #4caf50; }
+.b { background: #2196f3; }
+.r { background: #f44336; }
+.y { background: #ff9800; }
 
 /* PROGRESS */
 .bar {
   height: 8px;
   background: #333;
-  border-radius: 6px;
+  border-radius: 5px;
   overflow: hidden;
   margin: 5px 0;
 }
@@ -115,8 +120,8 @@ button {
 
 <div id="ui">
 
-  <div id="topbar">
-    💰 <span id="money">0</span> Kč | 🚉 Plzeň | ENGINE v2
+  <div id="top">
+    💰 <span id="money">0</span> Kč | 🚉 Plzeň | Koleje: 2
   </div>
 
   <div id="content">
@@ -126,24 +131,13 @@ button {
     <div id="detail">
       <h3 id="name">Vyber vlak</h3>
       <p id="state">---</p>
+      <img id="img"/>
 
-      <img id="img" />
+      <div class="bar"><div id="p1" class="fill"></div></div>
+      <div class="bar"><div id="p2" class="fill"></div></div>
+      <div class="bar"><div id="p3" class="fill"></div></div>
 
-      <div>
-        🧍 Exit
-        <div class="bar"><div id="bar_exit" class="fill"></div></div>
-
-        🧹 Clean
-        <div class="bar"><div id="bar_clean" class="fill"></div></div>
-
-        🚶 Board
-        <div class="bar"><div id="bar_board" class="fill"></div></div>
-      </div>
-
-      <button class="green" onclick="startExit()">VYLOŽIT</button>
-      <button class="orange" onclick="startClean()">ÚKLID</button>
-      <button class="blue" onclick="startBoard()">NÁSTUP</button>
-      <button class="red" onclick="depart()">ODJEZD</button>
+      <div id="actions"></div>
     </div>
 
   </div>
@@ -153,7 +147,7 @@ button {
 
 <script>
 
-// 🌍 MAP
+// 🌍 MAPA
 const map = L.map('map').setView([49.7384, 13.3736], 13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
@@ -161,140 +155,189 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 let money = 0;
 let selected = null;
 
-// 🚂 TRAINS
+// 🚉 KOLEJE
+let tracks = [null, null];
+
+// 🚂 VLAKY
 let trains = [
-  {
-    id: 1,
-    name: "810 → Rokycany",
-    image: "https://i.imgur.com/SSg8BRL.jpg",
-    state: "ARRIVED",
-
-    phase: null,
-    timer: 0,
-    activeTimer: null,
-
-    workflow: {
-      exit: 20,
-      clean: 180,
-      board: 20
-    },
-
-    progress: {
-      exit: 0,
-      clean: 0,
-      board: 0
-    }
-  }
+{
+  id: 1,
+  name: "810 → Rokycany",
+  image: "https://i.imgur.com/SSg8BRL.jpg",
+  state: "WAIT_ASSIGN",
+  track: null,
+  progress: { exit:0, clean:0, board:0 },
+  timers: { exit:20, clean:120, board:20 },
+  dot: false
+},
+{
+  id: 2,
+  name: "810 → Přeštice",
+  image: "https://i.imgur.com/SSg8BRL.jpg",
+  state: "WAIT_ASSIGN",
+  track: null,
+  progress: { exit:0, clean:0, board:0 },
+  timers: { exit:20, clean:120, board:20 },
+  dot: false
+},
+{
+  id: 3,
+  name: "Rychlík Praha",
+  image: "https://i.imgur.com/SSg8BRL.jpg",
+  state: "COMING",
+  track: null,
+  progress: {},
+  timers: {},
+  dot: false,
+  travel: 45,
+  travelMax: 45
+}
 ];
 
+// 🚉 ASSIGN TRACK
+function assign(train){
+  for(let i=0;i<tracks.length;i++){
+    if(!tracks[i]){
+      tracks[i] = train.id;
+      train.track = i+1;
+      train.state = "ARRIVED";
+      train.dot = true;
+      return;
+    }
+  }
+}
+
 // 📋 QUEUE
-function renderQueue() {
-  const q = document.getElementById("queue");
+function render(){
+  let q = document.getElementById("queue");
   q.innerHTML = "";
 
-  trains.forEach(t => {
-    const div = document.createElement("div");
-    div.className = "trainItem";
-    div.innerHTML = `<b>${t.name}</b><br><small>${t.state}</small>`;
-    div.onclick = () => select(t);
-    q.appendChild(div);
+  trains.forEach(t=>{
+    let d = document.createElement("div");
+    d.className = "train";
+
+    if(t.dot) {
+      let dot = document.createElement("div");
+      dot.className = "dot";
+      d.appendChild(dot);
+    }
+
+    d.innerHTML += `<b>${t.name}</b><br><small>${t.state}</small>`;
+    d.onclick = ()=>select(t);
+
+    q.appendChild(d);
   });
 }
 
 // 🎯 SELECT
-function select(t) {
+function select(t){
   selected = t;
-
   document.getElementById("name").innerText = t.name;
   document.getElementById("state").innerText = t.state;
   document.getElementById("img").src = t.image;
 
-  updateBars();
+  renderActions();
 }
 
-// 📊 BARS
-function updateBars() {
-  if (!selected) return;
+// ⚙️ ACTIONS
+function renderActions(){
+  let a = document.getElementById("actions");
+  a.innerHTML = "";
 
-  document.getElementById("bar_exit").style.width = selected.progress.exit + "%";
-  document.getElementById("bar_clean").style.width = selected.progress.clean + "%";
-  document.getElementById("bar_board").style.width = selected.progress.board + "%";
+  if(!selected) return;
+
+  if(selected.state === "ARRIVED"){
+    a.innerHTML += `<button class="g" onclick="start('exit')">VYLOŽIT</button>`;
+  }
+
+  if(selected.state === "WAIT_CLEAN"){
+    a.innerHTML += `<button class="y" onclick="start('clean')">ÚKLID</button>`;
+  }
+
+  if(selected.state === "WAIT_BOARD"){
+    a.innerHTML += `<button class="b" onclick="start('board')">NÁSTUP</button>`;
+  }
+
+  if(selected.state === "READY_DEPART"){
+    a.innerHTML += `<button class="r" onclick="depart()">ODJEZD</button>`;
+  }
 }
 
-// ⏱ TIMER ENGINE (CLEAN FSM)
-function runTimer(train, type, seconds, nextState) {
-  if (train.activeTimer) return;
+// ▶️ START TIMER
+function start(type){
+  if(!selected) return;
 
-  train.phase = type;
-  train.timer = seconds;
+  selected.active = type;
+  selected.timer = selected.timers[type];
 
-  train.activeTimer = setInterval(() => {
+  let interval = setInterval(()=>{
+    selected.timer--;
 
-    train.timer--;
+    let total = selected.timers[type];
+    let p = ((total - selected.timer)/total)*100;
+    selected.progress[type] = p;
 
-    let total = train.workflow[type];
-    let elapsed = total - train.timer;
+    if(type==="exit") document.getElementById("p1").style.width=p+"%";
+    if(type==="clean") document.getElementById("p2").style.width=p+"%";
+    if(type==="board") document.getElementById("p3").style.width=p+"%";
 
-    train.progress[type] = (elapsed / total) * 100;
+    if(selected.timer<=0){
+      clearInterval(interval);
 
-    if (selected && selected.id === train.id) {
-      updateBars();
+      if(type==="exit") selected.state="WAIT_CLEAN";
+      if(type==="clean") selected.state="WAIT_BOARD";
+      if(type==="board") selected.state="READY_DEPART";
+
+      selected.dot = (selected.state!=="READY_DEPART");
+      render();
+      renderActions();
     }
 
-    if (train.timer <= 0) {
-      clearInterval(train.activeTimer);
-      train.activeTimer = null;
-
-      train.timer = 0;
-      train.phase = null;
-
-      // 👉 KLÍČ: žádný auto-chain
-      train.state = nextState;
-    }
-
-  }, 1000);
-}
-
-// 🚶 EXIT
-function startExit() {
-  if (!selected) return;
-  runTimer(selected, "exit", selected.workflow.exit, "WAIT_CLEAN");
-}
-
-// 🧹 CLEAN
-function startClean() {
-  if (!selected) return;
-  runTimer(selected, "clean", selected.workflow.clean, "WAIT_BOARD");
-}
-
-// 🚶 BOARD
-function startBoard() {
-  if (!selected) return;
-  runTimer(selected, "board", selected.workflow.board, "READY_DEPARTURE");
+  },1000);
 }
 
 // 🚂 DEPART
-function depart() {
-  if (!selected) return;
-  if (selected.state !== "READY_DEPARTURE") return;
+function depart(){
+  if(selected.state!=="READY_DEPART") return;
 
   money += 100;
   document.getElementById("money").innerText = money;
 
-  selected.state = "DEPARTED";
-  selected = null;
+  tracks[selected.track-1]=null;
 
-  renderQueue();
+  selected.state="DONE";
+  selected.dot=false;
+
+  selected=null;
+  render();
 }
 
 // 🔁 LOOP
-setInterval(() => {
-  renderQueue();
-}, 1000);
+setInterval(()=>{
 
-renderQueue();
+  // 1) vlak přidělen
+  trains.forEach(t=>{
+    if(t.state==="WAIT_ASSIGN"){
+      assign(t);
+    }
+  });
+
+  // 2) rychlík přijíždí
+  let fast = trains.find(t=>t.name==="Rychlík Praha");
+
+  if(fast.state==="COMING"){
+    fast.travel--;
+    if(fast.travel<=0){
+      fast.state="WAIT_ASSIGN";
+    }
+  }
+
+  render();
+
+},1000);
+
+render();
 
 </script>
-
 </body>
 </html>
