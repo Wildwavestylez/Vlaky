@@ -168,6 +168,7 @@ let trains = [
   track: null,
   progress: { exit:0, clean:0, board:0 },
   timers: { exit:20, clean:120, board:20 },
+  train.pendingAction = false;
   
 },
 {
@@ -178,7 +179,7 @@ let trains = [
   track: null,
   progress: { exit:0, clean:0, board:0 },
   timers: { exit:20, clean:120, board:20 },
-  
+  train.pendingAction = false;
 },
 {
   id: 3,
@@ -189,7 +190,8 @@ let trains = [
   progress: {},
   timers: {},
   travel: 45,
-  travelMax: 45
+  travelMax: 45,
+  train.pendingAction = false;
 }
 ];
 
@@ -242,12 +244,7 @@ function select(t){
 }
 
 function hasDot(t, isSelected){
-  return (
-    (t.state === "WAIT_CLEAN" ||
-     t.state === "WAIT_BOARD" ||
-     t.state === "ARRIVED") &&
-    !isSelected
-  );
+  return t.pendingAction && !isSelected;
 }
 
 
@@ -300,6 +297,9 @@ function start(type){
   train.timer = train.timers[type];
   train.active = type;
 
+  // 👉 úkol začal = tečka NESMÍ svítit
+  train.pendingAction = false;
+
   let interval = setInterval(()=>{
 
     train.timer--;
@@ -312,19 +312,23 @@ function start(type){
     if(train.timer <= 0){
       clearInterval(interval);
 
+      train.timer = 0;
+      train.progress[type] = 100;
+
+      // 🚂 KLÍČOVÝ MOMENT:
+      // úkol je hotový → čeká na hráče → ZELENÁ TEČKA
+      train.pendingAction = true;
+
       if(type==="exit"){
         train.state = "WAIT_CLEAN";
-        train.dot = true;
       }
 
       if(type==="clean"){
         train.state = "WAIT_BOARD";
-        train.dot = true;
       }
 
       if(type==="board"){
         train.state = "READY_DEPART";
-        train.dot = true;
       }
 
       render();
