@@ -131,7 +131,7 @@ button {
     <div id="detail">
       <h3 id="name">Vyber vlak</h3>
       <p id="state">---</p>
-      <img id="img"/>
+      <img id="img" style="display:none;"/>
 
       <div class="bar"><div id="p1" class="fill"></div></div>
       <div class="bar"><div id="p2" class="fill"></div></div>
@@ -167,9 +167,8 @@ let trains = [
   state: "WAIT_ASSIGN",
   track: null,
   progress: { exit:0, clean:0, board:0 },
-  timers: { exit:20, clean:120, board:20 },
-  pendingAction = false;
-  
+  timers: { exit:5, clean:10, board:5 }, // Zkráceno pro rychlejší testování
+  pendingAction: false
 },
 {
   id: 2,
@@ -178,8 +177,8 @@ let trains = [
   state: "WAIT_ASSIGN",
   track: null,
   progress: { exit:0, clean:0, board:0 },
-  timers: { exit:20, clean:120, board:20 },
-  pendingAction = false;
+  timers: { exit:5, clean:10, board:5 }, // Zkráceno pro rychlejší testování
+  pendingAction: false
 },
 {
   id: 3,
@@ -187,11 +186,11 @@ let trains = [
   image: "https://i.imgur.com/SSg8BRL.jpg",
   state: "COMING",
   track: null,
-  progress: {},
-  timers: {},
-  travel: 45,
-  travelMax: 45,
-  pendingAction = false,
+  progress: { exit:0, clean:0, board:0 },
+  timers: { exit:8, clean:15, board:8 },
+  travel: 10, // Zkráceno z 45 na 10 pro testování
+  travelMax: 10,
+  pendingAction: false
 }
 ];
 
@@ -202,6 +201,7 @@ function assign(train){
       tracks[i] = train.id;
       train.track = i+1;
       train.state = "ARRIVED";
+      train.pendingAction = true; // Hráč musí kliknout na VYLOŽIT
       return;
     }
   }
@@ -209,27 +209,23 @@ function assign(train){
 
 // 📋 QUEUE
 function render(){
-
   let q = document.getElementById("queue");
   q.innerHTML = "";
 
   trains.forEach(t => {
-
     let d = document.createElement("div");
     d.className = "train";
 
-    // 👉 správná logika zelené tečky
     let isSelected = selected && selected.id === t.id;
     let showDot = hasDot(t, isSelected);
 
     d.innerHTML = `
       ${showDot ? '<div class="dot"></div>' : ''}
       <b>${t.name}</b><br>
-      <small>${t.state}</small>
+      <small>${t.state} ${t.track ? `(Kolej ${t.track})` : ''}</small>
     `;
 
     d.onclick = () => select(t);
-
     q.appendChild(d);
   });
 
@@ -246,14 +242,24 @@ function hasDot(t, isSelected){
   return t.pendingAction && !isSelected;
 }
 
-
 function updateDetail(){
-
-  if(!selected) return;
+  if(!selected) {
+    document.getElementById("name").innerText = "Vyber vlak";
+    document.getElementById("state").innerText = "---";
+    document.getElementById("img").style.display = "none";
+    document.getElementById("p1").style.width = "0%";
+    document.getElementById("p2").style.width = "0%";
+    document.getElementById("p3").style.width = "0%";
+    document.getElementById("actions").innerHTML = "";
+    return;
+  }
 
   document.getElementById("name").innerText = selected.name;
   document.getElementById("state").innerText = selected.state;
-  document.getElementById("img").src = selected.image;
+  
+  let img = document.getElementById("img");
+  img.src = selected.image;
+  img.style.display = "block";
 
   document.getElementById("p1").style.width = (selected.progress.exit || 0) + "%";
   document.getElementById("p2").style.width = (selected.progress.clean || 0) + "%";
@@ -272,15 +278,12 @@ function renderActions(){
   if(selected.state === "ARRIVED"){
     a.innerHTML += `<button class="g" onclick="start('exit')">VYLOŽIT</button>`;
   }
-
   if(selected.state === "WAIT_CLEAN"){
     a.innerHTML += `<button class="y" onclick="start('clean')">ÚKLID</button>`;
   }
-
   if(selected.state === "WAIT_BOARD"){
     a.innerHTML += `<button class="b" onclick="start('board')">NÁSTUP</button>`;
   }
-
   if(selected.state === "READY_DEPART"){
     a.innerHTML += `<button class="r" onclick="depart()">ODJEZD</button>`;
   }
@@ -288,47 +291,31 @@ function renderActions(){
 
 // ▶️ START TIMER
 function start(type){
-
   if(!selected) return;
 
   let train = selected;
-
   train.timer = train.timers[type];
   train.active = type;
-
-  // 👉 úkol začal = tečka NESMÍ svítit
   train.pendingAction = false;
 
-  let interval = setInterval(()=>{
+  render(); // Překreslíme hned, aby zmizela tečka v bočním menu
 
+  let interval = setInterval(()=>{
     train.timer--;
 
     let total = train.timers[type];
     let p = ((total - train.timer)/total)*100;
-
     train.progress[type] = p;
 
     if(train.timer <= 0){
       clearInterval(interval);
-
       train.timer = 0;
       train.progress[type] = 100;
-
-      // 🚂 KLÍČOVÝ MOMENT:
-      // úkol je hotový → čeká na hráče → ZELENÁ TEČKA
       train.pendingAction = true;
 
-      if(type==="exit"){
-        train.state = "WAIT_CLEAN";
-      }
-
-      if(type==="clean"){
-        train.state = "WAIT_BOARD";
-      }
-
-      if(type==="board"){
-        train.state = "READY_DEPART";
-      }
+      if(type==="exit")   train.state = "WAIT_CLEAN";
+      if(type==="clean")  train.state = "WAIT_BOARD";
+      if(type==="board")  train.state = "READY_DEPART";
 
       render();
     }
@@ -336,29 +323,27 @@ function start(type){
     if(selected?.id === train.id){
       updateDetail();
     }
-
-  },1000);
+  }, 1000);
 }
 
 // 🚂 DEPART
 function depart(){
-  if(selected.state!=="READY_DEPART") return;
+  if(!selected || selected.state!=="READY_DEPART") return;
 
   money += 100;
   document.getElementById("money").innerText = money;
 
-  tracks[selected.track-1]=null;
+  tracks[selected.track-1] = null;
 
-  selected.state="DONE";
-  selected.dot=false;
+  // Odstraníme vlak ze seznamu aktivních vlaků
+  trains = trains.filter(t => t.id !== selected.id);
 
-  selected=null;
+  selected = null;
   render();
 }
 
 // 🔁 LOOP
 setInterval(()=>{
-
   // 1) vlak přidělen
   trains.forEach(t=>{
     if(t.state==="WAIT_ASSIGN"){
@@ -368,8 +353,7 @@ setInterval(()=>{
 
   // 2) rychlík přijíždí
   let fast = trains.find(t=>t.name==="Rychlík Praha");
-
-  if(fast.state==="COMING"){
+  if(fast && fast.state==="COMING"){
     fast.travel--;
     if(fast.travel<=0){
       fast.state="WAIT_ASSIGN";
@@ -377,9 +361,9 @@ setInterval(()=>{
   }
 
   render();
+}, 1000);
 
-},1000);
-
+// První inicializace hry
 render();
 
 </script>
