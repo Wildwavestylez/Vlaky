@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="cs">
 <head>
-<meta charset="UTF-8">
+<meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Train Operations - Engine v1</title>
+<title>Train Ops - Clean FSM v1</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 
@@ -12,34 +12,28 @@ body {
   margin: 0;
   height: 100vh;
   overflow: hidden;
+  font-family: Arial;
 }
 
-/* MAPA */
+/* MAP */
 #map {
   height: calc(100vh - 55vh);
 }
 
-/* DRAWER */
+/* UI */
 #ui {
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
-
-  max-height: 55vh;
+  height: 55vh;
   background: #111;
   color: white;
-
-  border-top-left-radius: 16px;
-  border-top-right-radius: 16px;
-
   display: flex;
   flex-direction: column;
-
-  overflow: hidden;
 }
 
-/* TOP BAR */
+/* TOP */
 #topbar {
   padding: 6px;
   background: #1c1c1c;
@@ -53,42 +47,27 @@ body {
   overflow: hidden;
 }
 
-/* QUEUE */
 #queue {
   width: 40%;
   background: #151515;
   overflow-y: auto;
 }
 
-.trainItem {
-  padding: 8px;
-  margin: 5px;
+.item {
+  padding: 10px;
+  margin: 6px;
   background: #222;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 12px;
 }
 
-.trainItem img {
-  width: 100%;
-  border-radius: 6px;
-  margin-top: 5px;
-}
-
-/* DETAIL */
 #detail {
   flex: 1;
   padding: 10px;
-  overflow-y: auto;
-}
-
-#detail img {
-  width: 100%;
-  border-radius: 10px;
 }
 
 button {
-  margin: 3px;
+  margin: 4px;
   padding: 8px;
   border: none;
   border-radius: 6px;
@@ -96,22 +75,14 @@ button {
   cursor: pointer;
 }
 
-.green { background: #4caf50; }
-.blue { background: #2196f3; }
-.red { background: #f44336; }
+.g { background:#4caf50; }
+.b { background:#2196f3; }
+.r { background:#f44336; }
+.o { background:#ff9800; }
 
-.bar {
-  height: 8px;
-  background: #333;
-  border-radius: 5px;
-  overflow: hidden;
-  margin: 5px 0;
-}
-
-.fill {
-  height: 100%;
-  width: 0%;
-  background: limegreen;
+img {
+  width: 100%;
+  border-radius: 10px;
 }
 </style>
 </head>
@@ -123,35 +94,29 @@ button {
 <div id="ui">
 
   <div id="topbar">
-    💰 <span id="money">0</span> Kč | 🚉 Plzeň | Kolej: 1
+    💰 <span id="money">0</span> Kč | 🚉 Plzeň
   </div>
 
   <div id="content">
 
-    <!-- QUEUE -->
     <div id="queue"></div>
 
-    <!-- DETAIL -->
     <div id="detail">
-      <h3 id="tName">Vyber vlak</h3>
-      <img id="tImg" />
-      <p id="tState">---</p>
-      <p>State timer: <span id="tTimer">--</span></p>
+      <h3 id="name">Vyber vlak</h3>
+      <p id="state">---</p>
+      <p id="track">---</p>
 
-      <div>
-        🧍 Výstup
-        <div class="bar"><div id="exitBar" class="fill"></div></div>
+      <img id="img" />
 
-        🧹 Úklid
-        <div class="bar"><div id="cleanBar" class="fill"></div></div>
-
-        🚶 Nástup
-        <div class="bar"><div id="boardBar" class="fill"></div></div>
+      <div id="info">
+        ⏱ <span id="timer">0</span>s
       </div>
 
-      <button class="green" onclick="startExit()">VYLOŽIT</button>
-      <button class="blue" onclick="startBoard()">NÁSTUP</button>
-      <button class="red" onclick="finishTrain()">ODJEZD</button>
+      <button class="g" onclick="exit()">VYLOŽIT</button>
+      <button class="o" onclick="clean()">ÚKLID</button>
+      <button class="b" onclick="board()">NÁSTUP</button>
+      <button class="r" onclick="depart()">ODJEZD</button>
+
     </div>
 
   </div>
@@ -165,162 +130,128 @@ button {
 const map = L.map('map').setView([49.7384, 13.3736], 13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-// 💰 STATE
+// 💰
 let money = 0;
 let selected = null;
 
-// 🚂 VLÁKNA
+// 🚂 VLAKY
 let trains = [
-  {
-    id: 1,
-    name: "810 → Rokycany",
-    image: "https://i.imgur.com/SSg8BRL.jpg",
-    state: "APPROACHING",
-    track: 1,
-    timers: { exit: 20, clean: 180, board: 20 },
-    progress: { exit: 0, clean: 0, board: 0 },
-    activeTimer: null
-  },
-  {
-    id: 2,
-    name: "810 → Přeštice",
-    image: "https://i.imgur.com/SSg8BRL.jpg",
-    state: "APPROACHING",
-    track: null,
-    timers: { exit: 20, clean: 180, board: 20 },
-    progress: { exit: 0, clean: 0, board: 0 },
-    activeTimer: null
-  }
+  createTrain(1, "810 → Rokycany"),
+  createTrain(2, "810 → Přeštice")
 ];
 
+function createTrain(id, name){
+  return {
+    id,
+    name,
+    image: "https://i.imgur.com/SSg8BRL.jpg",
+
+    state: "ARRIVED",
+    track: 1,
+
+    activeTimer: null,
+    timer: 0,
+
+    workflow: {
+      exit: 20,
+      clean: 180,
+      board: 20
+    }
+  };
+}
+
 // 📋 QUEUE
-function renderQueue() {
+function render(){
   const q = document.getElementById("queue");
   q.innerHTML = "";
 
-  trains.forEach(t => {
-    const div = document.createElement("div");
-    div.className = "trainItem";
-
-    div.innerHTML = `
-      <b>${t.name}</b><br>
-      <small>${t.state}</small>
-      <img src="${t.image}">
-    `;
-
-    div.onclick = () => selectTrain(t);
+  trains.forEach(t=>{
+    let div = document.createElement("div");
+    div.className = "item";
+    div.innerHTML = `<b>${t.name}</b><br>${t.state}`;
+    div.onclick = ()=>select(t);
     q.appendChild(div);
   });
 }
 
-// 🎯 SELECT
-function selectTrain(t) {
+function select(t){
   selected = t;
 
-  document.getElementById("tName").innerText = t.name;
-  document.getElementById("tImg").src = t.image;
-  document.getElementById("tState").innerText = t.state;
-
-  updateBars();
+  document.getElementById("name").innerText = t.name;
+  document.getElementById("state").innerText = t.state;
+  document.getElementById("track").innerText = "Kolej: " + t.track;
+  document.getElementById("img").src = t.image;
 }
 
-// 📊 BARS
-function updateBars() {
-  if (!selected) return;
+// 🧠 TIMER ENGINE (CLEAN FSM)
+function run(train, time, nextState){
 
-  document.getElementById("exitBar").style.width = selected.progress.exit + "%";
-  document.getElementById("cleanBar").style.width = selected.progress.clean + "%";
-  document.getElementById("boardBar").style.width = selected.progress.board + "%";
-}
+  if(train.activeTimer) return;
 
-// ⏱ TIMER ENGINE
-function runTimer(train, type, seconds, finishState) {
-  if (train.activeTimer) return;
+  train.timer = time;
 
-  train.phase = type;
-  train.timer = seconds;
+  train.activeTimer = setInterval(()=>{
 
-  train.activeTimer = setInterval(() => {
     train.timer--;
 
-    // progress (pro UI bar)
-    const total = train.phases[type];
-    const elapsed = total - train.timer;
-    const percent = (elapsed / total) * 100;
+    document.getElementById("timer").innerText = train.timer;
 
-    train.progress[type] = percent;
-
-    if (selected && selected.id === train.id) {
-      updateBars();
-    }
-
-    // TIMER DONE
-    if (train.timer <= 0) {
+    if(train.timer <= 0){
       clearInterval(train.activeTimer);
       train.activeTimer = null;
 
-      train.timer = 0;
-      train.progress[type] = 100;
+      train.state = nextState;
 
-      // 👉 KLÍČ: NEPOKRAČUJ AUTOMATICKY
-      train.state = finishState;
-
-      // čeká na hráče → žádné startClean/startBoard tady!
     }
 
-  }, 1000);
+  },1000);
 }
 
-// 🚶 VÝSTUP
-function startExit() {
-  if (!selected) return;
-
-  runTimer(selected, "exit", selected.timers.exit, "WAIT_CLEAN");
+// 🚶 EXIT
+function exit(){
+  if(!selected) return;
+  run(selected, selected.workflow.exit, "WAIT_CLEAN");
 }
 
-// 🧹 ÚKLID
-function startClean() {
-  if (!selected) return;
+// 🧹 CLEAN
+function clean(){
+  if(!selected) return;
+  if(selected.state !== "WAIT_CLEAN") return;
 
-  runTimer(selected, "clean", selected.timers.clean, "WAIT_BOARD");
+  run(selected, selected.workflow.clean, "WAIT_BOARD");
 }
 
-// 🚶 NÁSTUP
-function startBoard() {
-  if (!selected) return;
+// 🚶 BOARD
+function board(){
+  if(!selected) return;
+  if(selected.state !== "WAIT_BOARD") return;
 
-  runTimer(selected, "board", selected.timers.board, "READY_DEPARTURE");
+  run(selected, selected.workflow.board, "READY_DEPARTURE");
 }
 
-// 🚂 ODJEDZ
-function finishTrain() {
-  if (!selected) return;
-  if (selected.state !== "BOARD_DONE") return;
+// 🚂 DEPART
+function depart(){
+  if(!selected) return;
+  if(selected.state !== "READY_DEPARTURE") return;
 
   money += 100;
   document.getElementById("money").innerText = money;
 
   selected.state = "DEPARTED";
+
+  trains = trains.filter(t => t.id !== selected.id);
+
   selected = null;
 
-  renderQueue();
+  render();
 }
 
 // 🔁 LOOP
-setInterval(() => {
-  trains.forEach(t => {
-    if (t.state === "APPROACHING" && !t.track) {
-      t.track = 1;
-    }
+setInterval(()=>{
+  render();
+},1000);
 
-   
-  });
-
-  renderQueue();
-}, 1000);
-
-// START
-renderQueue();
+render();
 
 </script>
 
