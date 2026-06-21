@@ -168,7 +168,7 @@ let trains = [
   track: null,
   progress: { exit:0, clean:0, board:0 },
   timers: { exit:20, clean:120, board:20 },
-  train.pendingAction = false;
+  pendingAction = false;
   
 },
 {
@@ -179,7 +179,7 @@ let trains = [
   track: null,
   progress: { exit:0, clean:0, board:0 },
   timers: { exit:20, clean:120, board:20 },
-  train.pendingAction = false;
+  pendingAction = false;
 },
 {
   id: 3,
@@ -191,7 +191,7 @@ let trains = [
   timers: {},
   travel: 45,
   travelMax: 45,
-  train.pendingAction = false;
+  pendingAction = false,
 }
 ];
 
@@ -202,7 +202,6 @@ function assign(train){
       tracks[i] = train.id;
       train.track = i+1;
       train.state = "ARRIVED";
-      train.dot = true;
       return;
     }
   }
