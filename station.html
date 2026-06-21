@@ -234,25 +234,39 @@ function updateBars() {
 }
 
 // ⏱ TIMER ENGINE
-function runTimer(train, type, seconds, nextState) {
+function runTimer(train, type, seconds, finishState) {
   if (train.activeTimer) return;
 
-  train.state = type.toUpperCase();
-  let elapsed = 0;
+  train.phase = type;
+  train.timer = seconds;
 
   train.activeTimer = setInterval(() => {
-    elapsed++;
-    let percent = (elapsed / seconds) * 100;
+    train.timer--;
+
+    // progress (pro UI bar)
+    const total = train.phases[type];
+    const elapsed = total - train.timer;
+    const percent = (elapsed / total) * 100;
+
     train.progress[type] = percent;
 
-    if (elapsed >= seconds) {
-      clearInterval(train.activeTimer);
-      train.activeTimer = null;
-      train.progress[type] = 100;
-      train.state = nextState;
+    if (selected && selected.id === train.id) {
+      updateBars();
     }
 
-    if (selected && selected.id === train.id) updateBars();
+    // TIMER DONE
+    if (train.timer <= 0) {
+      clearInterval(train.activeTimer);
+      train.activeTimer = null;
+
+      train.timer = 0;
+      train.progress[type] = 100;
+
+      // 👉 KLÍČ: NEPOKRAČUJ AUTOMATICKY
+      train.state = finishState;
+
+      // čeká na hráče → žádné startClean/startBoard tady!
+    }
 
   }, 1000);
 }
@@ -260,18 +274,22 @@ function runTimer(train, type, seconds, nextState) {
 // 🚶 VÝSTUP
 function startExit() {
   if (!selected) return;
-  runTimer(selected, "exit", selected.timers.exit, "EXIT_DONE");
+
+  runTimer(selected, "exit", selected.timers.exit, "WAIT_CLEAN");
 }
 
 // 🧹 ÚKLID
-function startClean(train) {
-  runTimer(train, "clean", train.timers.clean, "CLEAN_DONE");
+function startClean() {
+  if (!selected) return;
+
+  runTimer(selected, "clean", selected.timers.clean, "WAIT_BOARD");
 }
 
 // 🚶 NÁSTUP
 function startBoard() {
   if (!selected) return;
-  runTimer(selected, "board", selected.timers.board, "BOARD_DONE");
+
+  runTimer(selected, "board", selected.timers.board, "READY_DEPARTURE");
 }
 
 // 🚂 ODJEDZ
@@ -295,13 +313,7 @@ setInterval(() => {
       t.track = 1;
     }
 
-    if (t.state === "EXIT_DONE") {
-      startClean(t);
-    }
-
-    if (t.state === "CLEAN_DONE") {
-      startBoard(t);
-    }
+   
   });
 
   renderQueue();
