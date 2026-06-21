@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Train Ops - IDEAL ARCH v2</title>
+  <link rel="stylesheet" href="https://unpkg.com"/>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div id="map"></div>
+
+  <div id="ui">
+    <div id="top">
+      💰 <span id="money">0</span> Kč | 🚉 Plzeň hl.n. | Koleje: 2
+    </div>
+    <div id="content">
+      <div id="queue"></div>
+      <div id="detail">
+        <h3 id="name">Vyber vlak</h3>
+        <p id="state">---</p>
+        <img id="img" style="display:none;"/>
+        <div class="bar"><div id="p1" class="fill"></div></div>
+        <div class="bar"><div id="p2" class="fill"></div></div>
+        <div class="bar"><div id="p3" class="fill"></div></div>
+        <div id="actions"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Knihovny a skripty -->
+  <script src="https://unpkg.com"></script>
+  <script src="data.js"></script>
+  <script src="game.js"></script>
+
+
+
+body {
+  margin: 0;
+  height: 100vh;
+  overflow: hidden;
+  font-family: Arial;
+}
+#map {
+  height: calc(100vh - 45vh);
+}
+#ui {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 45vh;
+  background: #111;
+  color: white;
+  overflow-y: auto;
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+}
+#top {
+  padding: 8px;
+  background: #1c1c1c;
+  font-size: 13px;
+}
+#content {
+  display: flex;
+}
+#queue {
+  width: 40%;
+  background: #151515;
+  overflow-y: auto;
+  height: calc(45vh - 35px);
+}
+.train {
+  padding: 8px;
+  margin: 6px;
+  background: #222;
+  border-radius: 8px;
+  cursor: pointer;
+  position: relative;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  background: limegreen;
+  border-radius: 50%;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+}
+#detail {
+  flex: 1;
+  padding: 10px;
+}
+img {
+  width: 100%;
+  max-height: 120px;
+  object-fit: cover;
+  border-radius: 10px;
+}
+button {
+  margin: 4px;
+  padding: 8px;
+  border: none;
+  border-radius: 8px;
+  font-weight: bold;
+  cursor: pointer;
+}
+.g { background: #4caf50; color: white; }
+.b { background: #2196f3; color: white; }
+.r { background: #f44336; color: white; }
+.y { background: #ff9800; color: white; }
+.bar {
+  height: 8px;
+  background: #333;
+  border-radius: 5px;
+  overflow: hidden;
+  margin: 5px 0;
+}
+.fill {
+  height: 100%;
+  width: 0%;
+  background: limegreen;
+}
+.train-div-icon {
+  font-size: 24px;
+  line-height: 1;
+  text-align: center;
+}
+
+// 🌍 INICIALIZACE MAPY
+const map = L.map('map').setView([49.7410, 13.3860], 11);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+// STAV HRY
+let money = 0;
+let selected = null;
+let tracks = [null, null];
+
+// 🗺️ TRASY (Plzeň -> Cíl)
+const routes = {
+  rokycany: [
+    [49.7414, 13.3866],
+    [49.7540, 13.4350],
+    [49.7470, 13.5150],
+    [49.7420, 13.5950]
+  ],
+  prestice: [
+    [49.7414, 13.3866],
+    [49.6640, 13.3610],
+    [49.5710, 13.3320]
+  ],
+  praha: [
+    [49.7414, 13.3866],
+    [49.7420, 13.5950],
+    [49.9630, 14.0720],
+    [50.0830, 14.4350]
+  ]
+};
+
+// 🚂 STARTOVNÍ VLAKY
+let trains = [
+  {
+    id: 1,
+    name: "810 → Rokycany",
+    image: "https://imgur.com",
+    state: "WAIT_ASSIGN",
+    track: null,
+    routeKey: "rokycany",
+    currentStep: 0,
+    stayTime: 10,
+    stayTimer: 0,
+    marker: null,
+    progress: { exit:0, clean:0, board:0 },
+    timers: { exit:5, clean:8, board:5 },
+    pendingAction: false
+  },
+  {
+    id: 2,
+    name: "810 → Přeštice",
+    image: "https://imgur.com",
+    state: "WAIT_ASSIGN",
+    track: null,
+    routeKey: "prestice",
+    currentStep: 0,
+    stayTime: 10,
+    stayTimer: 0,
+    marker: null,
+    progress: { exit:0, clean:0, board:0 },
+    timers: { exit:5, clean:8, board:5 },
+    pendingAction: false
+  },
+  {
+    id: 3,
+    name: "Rychlík Praha",
+    image: "https://imgur.com",
+    state: "COMING",
+    track: null,
+    routeKey: "praha",
+    currentStep: 0,
+    stayTime: 15,
+    stayTimer: 0,
+    marker: null,
+    progress: { exit:0, clean:0, board:0 },
+    timers: { exit:8, clean:12, board:8 },
+    travel: 5,
+    travelMax: 5,
+    pendingAction: false
+  }
+];
+
+
+// 🚉 PŘIDĚLENÍ KOLEJE
+function assign(train){
+  for(let i=0; i<tracks.length; i++){
+    if(!tracks[i]){
+      tracks[i] = train.id;
+      train.track = i+1;
+      train.state = "ARRIVED";
+      train.pendingAction = true;
+      return;
+    }
+  }
+}
+
+// 📋 VYKRESLENÍ SEZNAMU VLAKŮ
+function render(){
+  let q = document.getElementById("queue");
+  q.innerHTML = "";
+
+  trains.forEach(t => {
+    let d = document.createElement("div");
+    d.className = "train";
+
+    let isSelected = selected && selected.id === t.id;
+    let showDot = t.pendingAction && !isSelected;
+
+    let statusText = t.state;
+    if(t.state === "EN_ROUTE_THERE") statusText = "Jede do cíle ➔";
+    if(t.state === "AT_DESTINATION") statusText = `V cíli (${t.stayTimer}s)`;
+    if(t.state === "EN_ROUTE_BACK") statusText = "Vrací se zpět";
+    if(t.state === "COMING") statusText = `Přijíždí (${t.travel}s)`;
+    if(t.state === "ARRIVED") statusText = `Na stanici (Kolej ${t.track})`;
+
+    d.innerHTML = `
+      ${showDot ? '<div class="dot"></div>' : ''}
+      <b>${t.name}</b><br>
+      <small>${statusText}</small>
+    `;
+
+    d.onclick = () => { selected = t; updateDetail(); };
+    q.appendChild(d);
+  });
+
+  updateDetail();
+}
+
+// 🎯 DETAIL VYBRANÉHO VLAKU
+function updateDetail(){
+  if(!selected) {
+    document.getElementById("name").innerText = "Vyber vlak";
+    document.getElementById("state").innerText = "---";
+    document.getElementById("img").style.display = "none";
+    document.getElementById("p1").style.width = "0%";
+    document.getElementById("p2").style.width = "0%";
+    document.getElementById("p3").style.width = "0%";
+    document.getElementById("actions").innerHTML = "";
+    return;
+  }
+
+  document.getElementById("name").innerText = selected.name;
+  document.getElementById("state").innerText = selected.state;
+  
+  let img = document.getElementById("img");
+  img.src = selected.image;
+  img.style.display = "block";
+
+  document.getElementById("p1").style.width = (selected.progress.exit || 0) + "%";
+  document.getElementById("p2").style.width = (selected.progress.clean || 0) + "%";
+  document.getElementById("p3").style.width = (selected.progress.board || 0) + "%";
+
+  renderActions();
+}
+
+// ⚙️ TLAČÍTKA AKCÍ
+function renderActions(){
+  let a = document.getElementById("actions");
+  a.innerHTML = "";
+
+  if(!selected) return;
+
+  if(selected.state === "ARRIVED") a.innerHTML += `<button class="g" onclick="startTimer('exit')">VYLOŽIT</button>`;
+  if(selected.state === "WAIT_CLEAN") a.innerHTML += `<button class="y" onclick="startTimer('clean')">ÚKLID</button>`;
+  if(selected.state === "WAIT_BOARD") a.innerHTML += `<button class="b" onclick="startTimer('board')">NÁSTUP</button>`;
+  if(selected.state === "READY_DEPART") a.innerHTML += `<button class="r" onclick="depart()">ODJEZD</button>`;
+}
+
+// ▶️ SPUŠTĚNÍ ODBAVENÍ
+function startTimer(type){
+  if(!selected) return;
+
+  let train = selected;
+  train.timer = train.timers[type];
+  train.pendingAction = false;
+  render();
+
+  let interval = setInterval(()=>{
+    train.timer--;
+    train.progress[type] = ((train.timers[type] - train.timer) / train.timers[type]) * 100;
+
+    if(train.timer <= 0){
+      clearInterval(interval);
+      train.progress[type] = 100;
+      train.pendingAction = true;
+
+      if(type==="exit")   train.state = "WAIT_CLEAN";
+      if(type==="clean")  train.state = "WAIT_BOARD";
+      if(type==="board")  train.state = "READY_DEPART";
+
+      render();
+    }
+    if(selected?.id === train.id) updateDetail();
+  }, 1000);
+}
+
+// 🚂 ODJEZD Z PLZNĚ
+function depart(){
+  if(!selected || selected.state !== "READY_DEPART") return;
+
+  money += 100;
+  document.getElementById("money").innerText = money;
+
+  tracks[selected.track-1] = null;
+  selected.track = null;
+  selected.state = "EN_ROUTE_THERE";
+  selected.currentStep = 0;
+  selected.pendingAction = false;
+
+  selected.marker = L.marker(routes[selected.routeKey][0], {
+    icon: L.divIcon({ html: '🚂', className: 'train-div-icon', iconSize: [24, 24] })
+  }).addTo(map);
+
+  selected.progress = { exit:0, clean:0, board:0 };
+  selected = null;
+  render();
+}
+
+// 🔁 BULLETPROOF HERNÍ LOOP
+setInterval(()=>{
+  trains.forEach(t => {
+    if(t.state === "WAIT_ASSIGN") assign(t);
+    
+    if(t.state === "COMING" && --t.travel <= 0) t.state = "WAIT_ASSIGN";
+
+    if(t.state === "EN_ROUTE_THERE"){
+      const route = routes[t.routeKey];
+      t.currentStep++;
+      if(t.currentStep < route.length) {
+        t.marker.setLatLng(route[t.currentStep]);
+      } else {
+        t.state = "AT_DESTINATION";
+        t.stayTimer = t.stayTime;
+      }
+    }
+
+    if(t.state === "AT_DESTINATION" && --t.stayTimer <= 0){
+      t.state = "EN_ROUTE_BACK";
+      t.currentStep = routes[t.routeKey].length - 1;
+    }
+
+    if(t.state === "EN_ROUTE_BACK"){
+      t.currentStep--;
+      if(t.currentStep >= 0) {
+        t.marker.setLatLng(routes[t.routeKey][t.currentStep]);
+      } else {
+        map.removeLayer(t.marker);
+        t.marker = null;
+        t.state = "COMING";
+        t.travel = 5;
+      }
+    }
+  });
+  render();
+}, 1000);
+
+// Start hry
+render();
+
+
+</body>
+</html>
